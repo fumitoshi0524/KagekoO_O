@@ -1,6 +1,6 @@
 # KagekoO_O
 
-[English](./README.md)
+[English](./README.md) | **中文**
 
 KagekoO_O 是一个可组合的智能体运行时框架，用于构建具备工具调用能力的助手和检索增强型工作流。本项目是我在学习智能体与设计模式过程中编写的成果。
 

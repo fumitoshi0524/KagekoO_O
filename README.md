@@ -1,6 +1,6 @@
 # KagekoO_O
 
-[中文版](./README_CN.md)
+**English** | [中文](./README_CN.md)
 
 KagekoO_O is a composable agent runtime for building tool-using assistants and retrieval-augmented workflows, which is what I've written during my agent and design pattern learning progress.
 
