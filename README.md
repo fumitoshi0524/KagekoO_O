@@ -97,8 +97,40 @@ The default tool pack registers:
 - bash.run
 - todo.write
 - skill.load
+- skill.describe
+- skill.list
 
 Tool file access is restricted to the configured workspace root.
+
+## Skill format compatibility
+
+`skill.load` keeps backward compatibility with `<name>.skill`, and now also supports
+mainstream skill layouts:
+
+1. Single-file markdown skill: `<skills_dir>/<name>.md`
+2. Directory skill: `<skills_dir>/<name>/SKILL.md`
+3. Structured manifests: `.toml`, `.json`, `.yaml`, `.yml`
+
+For markdown skills, YAML frontmatter is supported and aligned with common agent
+ecosystem conventions:
+
+```markdown
+---
+name: fundamental-analysis
+description: Analyze macro and news context for the target symbol.
+tools:
+  - file.read
+  - bash.run
+---
+# Instructions
+
+1. Gather macro indicators.
+2. Summarize recent related news.
+3. Produce a concise risk-aware fundamental view.
+```
+
+`skill.describe` returns normalized JSON metadata for one skill, and `skill.list`
+returns the discoverable skills from `KAGEKO_SKILLS_DIR` and `<workspace>/skills`.
 
 ## Environment Variables
 

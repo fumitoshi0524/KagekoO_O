@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "KagekoO_O"
 version = "0.1.0"
@@ -7,6 +11,9 @@ dependencies = ["chromadb>=1.5.7", "dotenv>=0.9.9", "openai>=2.30.0"]
 [tool.setuptools]
 packages = ["core", "agents", "integrations"]
 py-modules = ["runtime", "KagekoO_O"]
+
+[tool.uv]
+package = true
 
 [dependency-groups]
 dev = ["deptry>=0.25.1"]

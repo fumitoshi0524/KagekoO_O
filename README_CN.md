@@ -97,8 +97,38 @@ RAG 模式需要设置 `enable_rag=True` 以启用检索器。
 - `bash.run`
 - `todo.write`
 - `skill.load`
+- `skill.describe`
+- `skill.list`
 
 工具的文件访问权限限制在已配置的工作区根目录内。
+
+## Skill 格式兼容（对齐主流用法）
+
+`skill.load` 继续兼容旧格式 `<name>.skill`，并新增支持主流 skill 组织方式：
+
+1. 单文件 Markdown：`<skills_dir>/<name>.md`
+2. 目录式 Skill：`<skills_dir>/<name>/SKILL.md`
+3. 结构化清单：`.toml`、`.json`、`.yaml`、`.yml`
+
+对于 Markdown Skill，支持 YAML Frontmatter（与常见 agent 生态格式一致）：
+
+```markdown
+---
+name: fundamental-analysis
+description: Analyze macro and news context for the target symbol.
+tools:
+  - file.read
+  - bash.run
+---
+# Instructions
+
+1. Gather macro indicators.
+2. Summarize recent related news.
+3. Produce a concise risk-aware fundamental view.
+```
+
+`skill.describe` 会返回单个 skill 的标准化 JSON 元数据，`skill.list` 会列出
+`KAGEKO_SKILLS_DIR` 与 `<workspace>/skills` 下可发现的 skill。
 
 ## 环境变量
 
