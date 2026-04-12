@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..core.models import AgentRequest, AgentResponse
-from ..core.services import Services
+from core.models import AgentRequest, AgentResponse
+from core.services import Services
 from .strategies import (
     ChatStrategy,
     PlanExecuteStrategy,

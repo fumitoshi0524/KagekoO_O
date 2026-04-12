@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from ..core.context import ContextWindow
+from core.context import ContextWindow
 
 
 @dataclass(slots=True, kw_only=True)

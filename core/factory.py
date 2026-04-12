@@ -4,16 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..agents.modes import (
+from agents.modes import (
     ChatAgent,
     PlanExecuteAgent,
     RAGAgent,
     ReactAgent,
     ReflectAgent,
 )
-from .models import AgentMode
-from .ports import Agent
-from .services import Services
+from core.models import AgentMode
+from core.ports import Agent
+from core.services import Services
 
 
 @dataclass(slots=True, kw_only=True)

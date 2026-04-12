@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..core.models import AgentRequest, AgentResponse, ToolUse
-from ..core.services import Services
+from core.models import AgentRequest, AgentResponse, ToolUse
+from core.services import Services
 from .base import Strategy
 
 

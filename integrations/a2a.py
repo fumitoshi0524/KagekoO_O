@@ -7,8 +7,8 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..core.models import AgentRequest, AgentResponse
-    from ..core.ports import Agent
+    from core.models import AgentRequest, AgentResponse
+    from core.ports import Agent
 
 
 class MessageType(StrEnum):

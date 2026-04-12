@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from ..core.models import AgentRequest, ToolUse
-from ..core.services import Services
-from ..core.context import ContextWindow
+from core.models import AgentRequest, ToolUse
+from core.services import Services
+from core.context import ContextWindow
 
 
 def _prompt(prefix: str, message: str) -> str:

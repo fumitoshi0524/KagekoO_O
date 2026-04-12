@@ -9,24 +9,14 @@ import re
 
 from dotenv import find_dotenv, load_dotenv
 
-if __package__ and __package__.startswith("KagekoO_O"):
-    from .core.factory import AgentFactory
-    from .core.models import AgentMode, AgentRequest, AgentResponse, ToolUse
-    from .core.orchestrator import AgentOrchestrator
-    from .core.services import Services
-    from .integrations.builtins import BuiltinToolPack
-    from .integrations.llm import create_llm_adapter
-    from .integrations.memory import InMemorySessionStore
-    from .integrations.tools import ToolRegistry
-else:
-    from core.factory import AgentFactory
-    from core.models import AgentMode, AgentRequest, AgentResponse, ToolUse
-    from core.orchestrator import AgentOrchestrator
-    from core.services import Services
-    from integrations.builtins import BuiltinToolPack
-    from integrations.llm import create_llm_adapter
-    from integrations.memory import InMemorySessionStore
-    from integrations.tools import ToolRegistry
+from core.factory import AgentFactory
+from core.models import AgentMode, AgentRequest, AgentResponse, ToolUse
+from core.orchestrator import AgentOrchestrator
+from core.services import Services
+from integrations.builtins import BuiltinToolPack
+from integrations.llm import create_llm_adapter
+from integrations.memory import InMemorySessionStore
+from integrations.tools import ToolRegistry
 
 _POWERSHELL_ENV_PATTERN = re.compile(
     r"\$env:([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\r\n$#]+))"
@@ -144,10 +134,7 @@ def create_runtime(
     # Optional RAG setup
     retriever = None
     if enable_rag:
-        if __package__ and __package__.startswith("KagekoO_O"):
-            from .integrations.rag import VectorStore
-        else:
-            from integrations.rag import VectorStore
+        from integrations.rag import VectorStore
 
         vector_store = VectorStore(
             collection_name="kageko_docs",
@@ -165,10 +152,7 @@ def create_runtime(
 
     # Optional MCP setup
     if enable_mcp and mcp_server_url:
-        if __package__ and __package__.startswith("KagekoO_O"):
-            from .integrations.mcp import MCPClient, MCPToolAdapter
-        else:
-            from integrations.mcp import MCPClient, MCPToolAdapter
+        from integrations.mcp import MCPClient, MCPToolAdapter
 
         mcp_client = MCPClient(server_url=mcp_server_url)
         mcp_client.connect()

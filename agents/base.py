@@ -3,8 +3,8 @@
 from typing import Protocol
 from abc import abstractmethod
 
-from ..core.models import AgentRequest, ToolUse
-from ..core.services import Services
+from core.models import AgentRequest, ToolUse
+from core.services import Services
 
 
 class Strategy(Protocol):
