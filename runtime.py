@@ -50,6 +50,8 @@ def _load_environment() -> None:
 @dataclass(slots=True, kw_only=True)
 class KagekoRuntime:
     orchestrator: AgentOrchestrator
+    provider: str
+    model: str | None
 
     def run(
         self,
@@ -103,19 +105,27 @@ def create_runtime(
     ):
         selected_provider = "openai"
     else:
-        selected_provider = "local"
+        raise ValueError(
+            "No LLM provider configured. Set KAGEKO_PROVIDER to openai/deepseek "
+            "and provide OPENAI_API_KEY or DEEPSEEK_API_KEY (or KAGEKO_API_KEY)."
+        )
 
     normalized_provider = selected_provider.strip().lower()
+    if normalized_provider not in {"openai", "deepseek"}:
+        raise ValueError(
+            f"Unsupported provider '{selected_provider}'. Supported providers: openai, deepseek."
+        )
+
     if api_key is not None and api_key.strip() != "":
         resolved_api_key = api_key
     elif normalized_provider == "deepseek":
         resolved_api_key = kageko_key or deepseek_key
-    elif normalized_provider == "openai":
-        resolved_api_key = kageko_key or openai_key
     else:
-        resolved_api_key = kageko_key or openai_key or deepseek_key
+        resolved_api_key = kageko_key or openai_key
 
     resolved_model = model or os.getenv("KAGEKO_MODEL")
+    if not resolved_model:
+        resolved_model = "deepseek-chat" if normalized_provider == "deepseek" else "gpt-4.1-mini"
     resolved_base_url = base_url or os.getenv("KAGEKO_BASE_URL")
 
     runtime_workspace = Path(
@@ -166,7 +176,7 @@ def create_runtime(
 
     services = Services(
         llm=create_llm_adapter(
-            provider=selected_provider,
+            provider=normalized_provider,
             api_key=resolved_api_key,
             model=resolved_model,
             base_url=resolved_base_url,
@@ -176,4 +186,8 @@ def create_runtime(
         retriever=retriever,
     )
     orchestrator = AgentOrchestrator(factory=AgentFactory(services=services))
-    return KagekoRuntime(orchestrator=orchestrator)
+    return KagekoRuntime(
+        orchestrator=orchestrator,
+        provider=normalized_provider,
+        model=resolved_model,
+    )

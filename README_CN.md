@@ -141,6 +141,8 @@ tools:
 - `KAGEKO_WORKSPACE`
 - `KAGEKO_SKILLS_DIR`
 
+本框架已禁用本地 echo 模式，必须使用 `openai` 或 `deepseek` 并提供有效 API Key。
+
 运行时也会从 `.env` 文件中加载配置，包括 PowerShell 风格的赋值语句。
 
 ## RAG 配置

@@ -143,6 +143,9 @@ returns the discoverable skills from `KAGEKO_SKILLS_DIR` and `<workspace>/skills
 - KAGEKO_WORKSPACE
 - KAGEKO_SKILLS_DIR
 
+Local echo mode is intentionally disabled. You must configure an `openai` or `deepseek`
+provider with a valid API key.
+
 The runtime also loads values from .env, including PowerShell-style assignments.
 
 ## RAG Setup

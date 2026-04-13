@@ -10,22 +10,6 @@ if TYPE_CHECKING:
 
 
 @dataclass(slots=True, kw_only=True)
-class LocalEchoModel:
-    model_name: str = "local-echo"
-
-    def generate(self, prompt: str) -> str:
-        return f"[{self.model_name}] {prompt.strip()}"
-
-
-@dataclass(slots=True, kw_only=True)
-class EchoModelAdapter:
-    model: LocalEchoModel
-
-    def complete(self, prompt: str) -> str:
-        return self.model.generate(prompt)
-
-
-@dataclass(slots=True, kw_only=True)
 class OpenAIResponsesAdapter:
     client: OpenAI
     model: str
@@ -74,10 +58,6 @@ def create_llm_adapter(
 ):
     normalized = provider.strip().lower()
 
-    if normalized == "local":
-        local_model = model or "local-echo"
-        return EchoModelAdapter(model=LocalEchoModel(model_name=local_model))
-
     if normalized == "openai":
         from openai import OpenAI
 
@@ -100,5 +80,5 @@ def create_llm_adapter(
         )
 
     raise ValueError(
-        f"Unsupported provider '{provider}'. Supported providers: openai, deepseek, local."
+        f"Unsupported provider '{provider}'. Supported providers: openai, deepseek."
     )
