@@ -24,7 +24,7 @@ KagekoO_O is a framework layer, not a monolithic app. It provides clear runtime 
 
 Integrated modules include:
 
-- LLM API adapter (currently only for openai & openai compatible api)
+- Multi-provider LLM adapters: OpenAI, DeepSeek, Claude, Gemini
 - ChromaDB-backed retrieval
 - In-memory session store
 - MCP integration scaffolding
@@ -53,6 +53,25 @@ Optional if you use uv tooling:
 	)
 	response = runtime.run(AgentMode.CHAT, "Summarize the architecture in one paragraph.")
 	print(response.text)
+
+## CLI Quick Start
+
+After install, use the `kageko` command:
+
+	kageko
+
+The REPL supports:
+
+- Runtime controls: `/config`, `/status`, `/mode`, `/provider`, `/model`, `/session`
+- Customization: `/profile work|fun|off`, `/persona`, `/system`, `/style`
+- Skill-first workflow:
+  - `/skills list`, `/skills show <name>`
+  - `/<skill-name> [input]` (dynamic slash skill invocation)
+
+If provider/model/API key are missing, Kageko opens a config panel on startup.
+
+If `<workspace>/AGENT.md` exists, its content is automatically injected as default
+workspace instruction, and can be combined with profile/persona customizations.
 
 ## Runtime API
 
@@ -137,14 +156,18 @@ returns the discoverable skills from `KAGEKO_SKILLS_DIR` and `<workspace>/skills
 - KAGEKO_PROVIDER
 - OPENAI_API_KEY
 - DEEPSEEK_API_KEY
+- CLAUDE_API_KEY
+- ANTHROPIC_API_KEY
+- GEMINI_API_KEY
+- GOOGLE_API_KEY
 - KAGEKO_API_KEY
 - KAGEKO_MODEL
 - KAGEKO_BASE_URL
 - KAGEKO_WORKSPACE
 - KAGEKO_SKILLS_DIR
 
-Local echo mode is intentionally disabled. You must configure an `openai` or `deepseek`
-provider with a valid API key.
+Local echo mode is intentionally disabled. Configure one provider (`openai`,
+`deepseek`, `claude`, or `gemini`) with a valid API key.
 
 The runtime also loads values from .env, including PowerShell-style assignments.
 

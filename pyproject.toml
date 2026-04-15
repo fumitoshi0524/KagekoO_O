@@ -6,11 +6,20 @@ build-backend = "setuptools.build_meta"
 name = "KagekoO_O"
 version = "0.1.0"
 requires-python = ">=3.13"
-dependencies = ["chromadb>=1.5.7", "dotenv>=0.9.9", "openai>=2.30.0"]
+dependencies = [
+    "anthropic>=0.57.1",
+    "chromadb>=1.5.7",
+    "dotenv>=0.9.9",
+    "google-genai>=1.13.0",
+    "openai>=2.30.0",
+]
+
+[project.scripts]
+kageko = "kageko_cli:main"
 
 [tool.setuptools]
 packages = ["core", "agents", "integrations"]
-py-modules = ["runtime", "KagekoO_O"]
+py-modules = ["runtime", "KagekoO_O", "kageko_cli"]
 
 [tool.uv]
 package = true

@@ -24,7 +24,7 @@ KagekoO_O 是一个框架层，而非单体应用。它提供了清晰的运行�
 
 已集成的模块包括：
 
-- LLM API 适配器（目前仅支持 OpenAI 及兼容 OpenAI 的 API）
+- 多提供商 LLM 适配器：OpenAI、DeepSeek、Claude、Gemini
 - ChromaDB 向量检索
 - 内存会话存储
 - MCP 集成脚手架
@@ -53,6 +53,25 @@ KagekoO_O 是一个框架层，而非单体应用。它提供了清晰的运行�
 	)
 	response = runtime.run(AgentMode.CHAT, "用一段话概括该架构。")
 	print(response.text)
+
+## CLI 快速开始
+
+安装后可使用 `kageko` 命令：
+
+	kageko
+
+REPL 支持：
+
+- 运行时控制：`/config`、`/status`、`/mode`、`/provider`、`/model`、`/session`
+- 自定义能力：`/profile work|fun|off`、`/persona`、`/system`、`/style`
+- Skill 工作流：
+  - `/skills list`、`/skills show <name>`
+  - `/<skill-name> [input]`（动态斜杠命令调用 skill）
+
+若缺少 provider/model/API key，Kageko 启动时会自动进入配置面板。
+
+若 `<workspace>/AGENT.md` 存在，会自动作为默认工作区指令注入，并可与
+profile/persona 自定义叠加使用。
 
 ## 运行时 API
 
@@ -135,13 +154,18 @@ tools:
 - `KAGEKO_PROVIDER`
 - `OPENAI_API_KEY`
 - `DEEPSEEK_API_KEY`
+- `CLAUDE_API_KEY`
+- `ANTHROPIC_API_KEY`
+- `GEMINI_API_KEY`
+- `GOOGLE_API_KEY`
 - `KAGEKO_API_KEY`
 - `KAGEKO_MODEL`
 - `KAGEKO_BASE_URL`
 - `KAGEKO_WORKSPACE`
 - `KAGEKO_SKILLS_DIR`
 
-本框架已禁用本地 echo 模式，必须使用 `openai` 或 `deepseek` 并提供有效 API Key。
+本框架已禁用本地 echo 模式，必须配置 `openai`、`deepseek`、`claude`、`gemini`
+之一并提供有效 API Key。
 
 运行时也会从 `.env` 文件中加载配置，包括 PowerShell 风格的赋值语句。
 

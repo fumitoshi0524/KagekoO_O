@@ -86,6 +86,10 @@ def create_runtime(
     env_provider = os.getenv("KAGEKO_PROVIDER")
     openai_key = os.getenv("OPENAI_API_KEY")
     deepseek_key = os.getenv("DEEPSEEK_API_KEY")
+    claude_key = os.getenv("CLAUDE_API_KEY")
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    google_api_key = os.getenv("GOOGLE_API_KEY")
     kageko_key = os.getenv("KAGEKO_API_KEY")
 
     if provider is not None:
@@ -100,32 +104,51 @@ def create_runtime(
         and not (openai_key and openai_key.strip() != "")
     ):
         selected_provider = "deepseek"
+    elif (claude_key and claude_key.strip() != "") or (
+        anthropic_key and anthropic_key.strip() != ""
+    ):
+        selected_provider = "claude"
+    elif (gemini_key and gemini_key.strip() != "") or (
+        google_api_key and google_api_key.strip() != ""
+    ):
+        selected_provider = "gemini"
     elif (kageko_key and kageko_key.strip() != "") or (
         openai_key and openai_key.strip() != ""
     ):
         selected_provider = "openai"
     else:
         raise ValueError(
-            "No LLM provider configured. Set KAGEKO_PROVIDER to openai/deepseek "
-            "and provide OPENAI_API_KEY or DEEPSEEK_API_KEY (or KAGEKO_API_KEY)."
+            "No LLM provider configured. Set KAGEKO_PROVIDER to openai/deepseek/claude/gemini "
+            "and provide corresponding API key."
         )
 
     normalized_provider = selected_provider.strip().lower()
-    if normalized_provider not in {"openai", "deepseek"}:
+    supported_providers = {"openai", "deepseek", "claude", "gemini"}
+    if normalized_provider not in supported_providers:
         raise ValueError(
-            f"Unsupported provider '{selected_provider}'. Supported providers: openai, deepseek."
+            f"Unsupported provider '{selected_provider}'. Supported providers: {', '.join(sorted(supported_providers))}."
         )
 
     if api_key is not None and api_key.strip() != "":
         resolved_api_key = api_key
     elif normalized_provider == "deepseek":
         resolved_api_key = kageko_key or deepseek_key
+    elif normalized_provider == "claude":
+        resolved_api_key = kageko_key or claude_key or anthropic_key
+    elif normalized_provider == "gemini":
+        resolved_api_key = kageko_key or gemini_key or google_api_key
     else:
         resolved_api_key = kageko_key or openai_key
 
     resolved_model = model or os.getenv("KAGEKO_MODEL")
     if not resolved_model:
-        resolved_model = "deepseek-chat" if normalized_provider == "deepseek" else "gpt-4.1-mini"
+        default_models = {
+            "openai": "gpt-4.1-mini",
+            "deepseek": "deepseek-chat",
+            "claude": "claude-3-7-sonnet-latest",
+            "gemini": "gemini-2.5-flash",
+        }
+        resolved_model = default_models[normalized_provider]
     resolved_base_url = base_url or os.getenv("KAGEKO_BASE_URL")
 
     runtime_workspace = Path(
