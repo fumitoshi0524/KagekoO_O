@@ -12,14 +12,17 @@ dependencies = [
     "dotenv>=0.9.9",
     "google-genai>=1.13.0",
     "openai>=2.30.0",
+    "typer>=0.9.0",
+    "rich>=13.0.0",
 ]
 
 [project.scripts]
-kageko = "kageko_cli:main"
+kageko-qaoa = "kageko_qaoa:main"
+kageko = "qaoa.cli:_entrypoint"
 
 [tool.setuptools]
-packages = ["core", "agents", "integrations"]
-py-modules = ["runtime", "KagekoO_O", "kageko_cli"]
+packages = ["qaoa", "qaoa.adapters", "qaoa.daemon", "qaoa.pipeline", "qaoa.tools"]
+py-modules = ["runtime", "KagekoO_O", "kageko_qaoa", "qaoa.cli"]
 
 [tool.uv]
 package = true
