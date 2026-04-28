@@ -16,3 +16,10 @@ wheels/
 # uv generated files
 uv.lock
 .python-version
+
+# AI assistant files (developer-local, not committed)
+CLAUDE.md
+AGENTS.md
+AGENT.md
+agents.md
+agent.md

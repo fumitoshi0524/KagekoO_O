@@ -43,13 +43,17 @@ kageko-qaoa synth --output data/qaoa_train.jsonl --sft-output data/sft_train.jso
 kageko-qaoa benchmark --input data/qaoa_train.jsonl --output data/pred.jsonl --provider openai
 kageko-qaoa eval --reference data/qaoa_train.jsonl --predicted data/pred.jsonl
 kageko-qaoa export-sft --input data/qaoa_train.jsonl --output data/sft_train.jsonl
+
+# Batch tool generation (server-side, hours-long)
+python scripts/generate_tools_batch.py --count 200 --provider openai
+python scripts/generate_tools_batch.py --count 500 --resume
 ```
 
 ## Key Architecture Decisions
 
 **UniToolCall alignment**: Tools follow the UniToolCall standard (arXiv:2604.11557) with 6 functional categories (`analysis`, `operations`, `system`, `visualization`, `search`, `generate`) and 13 application domains. `ToolSpec` carries `category` and `domain` fields.
 
-**Tool registry is frozen at startup.** Generated tools live in `tools/` and are auto-loaded at runtime via `GeneratedToolPack`. Once frozen, no tool modifications are possible. To change a tool, regenerate it via the pipeline and commit the new source file.
+**Tool registry is frozen at startup.** Generated tools live in `tools/<category>/` (organized by UniToolCall functional category) and are auto-loaded recursively via `GeneratedToolPack`. Once frozen, no tool modifications are possible. To change a tool, regenerate it via the pipeline and commit the new source file.
 
 **Provider selection is automatic** when not explicit: it checks env vars in priority order (KAGEKO_PROVIDER, then individual keys for DeepSeek->Claude->Gemini, falling back to OpenAI).
 

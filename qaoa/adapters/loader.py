@@ -19,7 +19,7 @@ class GeneratedToolPack:
     def register(self, registry: ToolRegistry) -> None:
         if self.tools_dir is None or not self.tools_dir.exists():
             return
-        for path in sorted(self.tools_dir.glob("*.py")):
+        for path in sorted(self.tools_dir.rglob("*.py")):
             if path.name.startswith("_"):
                 continue
             self._load_module(path, registry)
