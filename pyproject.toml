@@ -17,12 +17,12 @@ dependencies = [
 ]
 
 [project.scripts]
-kageko-qaoa = "kageko_qaoa:main"
+kageko-qaoa = "cli_qaoa:main"
 kageko = "qaoa.cli:_entrypoint"
 
 [tool.setuptools]
 packages = ["qaoa", "qaoa.adapters", "qaoa.daemon", "qaoa.pipeline", "qaoa.tools"]
-py-modules = ["runtime", "KagekoO_O", "kageko_qaoa", "qaoa.cli"]
+py-modules = ["KagekoO_O", "cli_qaoa", "qaoa.cli"]
 
 [tool.uv]
 package = true

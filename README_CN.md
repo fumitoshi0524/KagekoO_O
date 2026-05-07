@@ -32,7 +32,7 @@ KagekoO_O 提供了清晰的运行时边界，供开发者在此基础上进行�
 - `qaoa/learning.py`：数据集生成、JSONL 导出、严格评测
 - `qaoa/adapters/`：llm/tools/memory/rag/mcp 适配层
 - `qaoa/cli.py`：纯 Python Agent CLI（`kageko` 命令）
-- `kageko_qaoa.py`：训练/基准/评测 CLI（`kageko-qaoa` 命令）
+- `cli_qaoa.py`：训练/基准/评测 CLI（`kageko-qaoa` 命令）
 
 ## 安装
 

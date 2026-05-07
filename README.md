@@ -32,7 +32,7 @@ Integrated modules include:
 - `qaoa/learning.py`: dataset generation, JSONL export, strict evaluation
 - `qaoa/adapters/`: llm/tools/memory/rag/mcp adapters
 - `qaoa/cli.py`: Pure-Python agent CLI (`kageko` command)
-- `kageko_qaoa.py`: training/benchmark/evaluation CLI (`kageko-qaoa` command)
+- `cli_qaoa.py`: training/benchmark/evaluation CLI (`kageko-qaoa` command)
 
 ## Installation
 
