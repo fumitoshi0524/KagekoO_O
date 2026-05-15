@@ -2,268 +2,254 @@
 
 **English** | [中文](./README_CN.md)
 
-KagekoO_O is a QAOA-oriented agent runtime for building tool-using assistants. The runtime is now designed around a single canonical loop: Query -> Action -> Observation -> Answer.
+KagekoO_O is a QAOA-oriented agent runtime for building tool-using assistants. The runtime is built around a single canonical loop: **Query → Action → Observation → Answer**, with native function calling, streaming, and an iterative agentic execution model.
 
 ## What This Is
 
-KagekoO_O provides clear runtime boundaries you can build on:
-
-- A unified runtime entrypoint via create_runtime
-- Pluggable LLM adapters
+- A unified runtime entrypoint via `create_runtime`
+- Pluggable LLM adapters with native tool calling (OpenAI, DeepSeek, Claude, Gemini)
+- Streaming response support with real-time console rendering
+- Skill system with generation, conversion, and directory-based storage
+- Multi-layer permission pipeline (validate → rules → prompt → session memory)
+- Iterative QAOA engine with context compaction and error recovery
 - Workspace-scoped tool execution
-- Session memory and context handling
-- Structured QAOA turn traces for every response
-- Optional RAG and MCP extension modules
-
-## Capability
-
-Integrated modules include:
-
-- Multi-provider LLM adapters: OpenAI, DeepSeek, Claude, Gemini
-- ChromaDB-backed retrieval
-- In-memory session store
-- MCP integration scaffolding
-- QAOA action/observation data structures
+- Session memory with resume/fork support
+- Tab-completion REPL via prompt_toolkit
 
 ## Repository Layout
 
-- `qaoa/`: QAOA-native package root
-- `qaoa/types.py`: canonical QAOA data models
-- `qaoa/learning.py`: dataset generation, JSONL export, strict evaluation
-- `qaoa/adapters/`: llm/tools/memory/rag/mcp adapters
-- `qaoa/cli.py`: Pure-Python agent CLI (`kageko` command)
-- `cli_qaoa.py`: training/benchmark/evaluation CLI (`kageko-qaoa` command)
+```
+KagekoO_O/
+├── qaoa/
+│   ├── engine.py          # Iterative QAOA loop with native function calling
+│   ├── runtime.py         # create_runtime() factory
+│   ├── types.py           # Core data models (SkillSpec, QAOATurn, etc.)
+│   ├── streaming.py       # StreamEvent, ConsoleStreamRenderer
+│   ├── permissions.py     # Multi-layer permission pipeline
+│   ├── compact.py         # Context auto-compaction
+│   ├── tasks.py           # Persistent task board with DAG dependencies
+│   ├── context.py         # Workspace context loader
+│   ├── learning.py        # Dataset generation, JSONL export, evaluation
+│   ├── adapters/
+│   │   ├── llm.py         # LLM adapters (streaming + native tools)
+│   │   ├── memory.py      # Session store with resume/fork
+│   │   ├── rag.py         # ChromaDB vector store
+│   │   └── mcp.py         # MCP client (stub)
+│   ├── tools/
+│   │   ├── registry.py    # ToolRegistry + ToolSpec
+│   │   └── builtins.py    # Register all built-in tools
+│   ├── skills/
+│   │   ├── registry.py    # SkillRegistry
+│   │   ├── loader.py      # SkillLoader (markdown, TOML, JSON, YAML)
+│   │   ├── convert.py     # Claude Code / Superpowers → Kageko converter
+│   │   └── generator.py   # SkillGenerator (QAOA UniToolCall format)
+│   ├── agents/
+│   │   ├── subagent.py    # Sub-agent execution
+│   │   └── registry.py    # Agent definitions (general, explore, plan)
+│   ├── cli/
+│   │   ├── app.py         # Typer CLI app
+│   │   ├── repl.py         # REPL dispatcher with tab completion
+│   │   ├── render.py       # Rich table/panel renderers
+│   │   └── setup.py        # Setup wizard
+│   ├── daemon/             # JSON-RPC daemon
+│   ├── pipeline/           # QAOA data generation pipeline
+│   └── mcp/                # MCP protocol client
+├── test/                   # External test workspace (see below)
+└── pyproject.toml
+```
 
 ## Installation
 
 Requires Python 3.13+.
 
-Recommended for framework development:
-
-	pip install -e .
-
-Optional if you use uv tooling:
-
-	uv pip install -e .
+```bash
+uv pip install -e .
+```
 
 ## Quick Start
 
-	from KagekoO_O import AgentMode, create_runtime
+```python
+from KagekoO_O import AgentMode, create_runtime
 
-	runtime = create_runtime(
-		provider="openai",
-		model="gpt-4.1-mini",
-	)
-	response = runtime.run(AgentMode.QAOA, "Summarize the architecture in one paragraph.")
-	print(response.answer)
+runtime = create_runtime(
+    provider="openai",
+    model="gpt-4.1-mini",
+)
+response = runtime.run(AgentMode.QAOA, "Summarize the architecture in one paragraph.")
+print(response.answer)
+```
 
 ## Agent CLI
 
-The `kageko` command is a pure-Python Typer CLI. No Node.js build step required.
-
-### First-time setup
-
 ```bash
+# First-time setup
 kageko config init
-```
 
-This saves your provider and API key to `~/.kageko/config.json`. After setup, you never need to pass `--provider` or `--api-key` again.
-
-### Usage
-
-Start REPL:
-
-```bash
+# Interactive REPL with tab completion
 kageko
-```
 
-One-shot chat:
+# One-shot chat with streaming
+kageko chat --stream "Read AGENTS.md and summarize"
 
-```bash
-kageko chat "Summarize the architecture"
-```
+# One-shot chat (blocking)
+kageko chat "What is QAOA?"
 
-List tools:
-
-```bash
+# List available tools
 kageko tool list
+
+# Manage skills
+kageko skill list
+kageko skill import ./external-skills/ --format claude-code
+
+# Sessions
+kageko session list
 ```
 
-Call a tool directly:
+### REPL Commands
 
-```bash
-kageko tool call calculator '{"expression": "2+2"}'
-```
+| Command | Description |
+|---------|-------------|
+| `/help` | Show all commands |
+| `/session` | List sessions, switch by number or ID |
+| `/session new` | Create new session |
+| `/skill list` | List registered skills |
+| `/skill generate <name> <goal>` | Generate a QAOA skill |
+| `/skill use <name>` | Activate a skill |
+| `/skill import <path> --format <fmt>` | Import external skills |
+| `/tools list` | List all tools |
+| `/mode <default\|auto\|plan>` | Switch permission mode |
+| `/search <query>` | Search tools |
+| `/exit` | Quit |
 
-Generate a new tool from natural language:
-
-```bash
-kageko pipeline generate-tool "evaluate a math expression"
-```
-
-REPL commands:
-
-- `/session <id>`
-- `/skill generate <name> <goal>`
-- `/skill use <name>`, `/skill clear`, `/skill active`, `/skill list`
-- `/tools list`, `/tools show <name>`, `/tool <name> <payload>`
-
-You can still override credentials per-command if needed:
-
-```bash
-kageko --provider deepseek --api-key $DEEPSEEK_API_KEY chat "Hello"
-```
-
-QAOA data/eval pipeline CLI:
-
-```bash
-# 1) generate synthetic QAOA trajectories
-kageko-qaoa synth --output .\data\qaoa_train.jsonl --sft-output .\data\sft_train.jsonl
-
-# 2) run benchmark predictions with your runtime/model
-kageko-qaoa benchmark --input .\data\qaoa_train.jsonl --output .\data\pred.jsonl --provider openai
-
-# 3) strict evaluation (call/turn/conversation)
-kageko-qaoa eval --reference .\data\qaoa_train.jsonl --predicted .\data\pred.jsonl
-```
-
-If `<workspace>/AGENT.md` exists, its content is automatically injected as default
-workspace instruction, and can be combined with profile/persona customizations.
-
-## Generated Tools (Frozen Source Code)
-
-All tools are generated through the pipeline. Once generated, they become **immutable source code** in the project:
-
-```bash
-# Generate a new tool — it becomes a .py file in tools/
-kageko pipeline generate-tool "evaluate a math expression"
-
-# The generated tool is now part of the project source
-# It is loaded at runtime and frozen — no modifications allowed at runtime
-```
-
-- Generated tools live in `tools/` as Python modules
-- They are auto-discovered and registered at runtime startup
-- The tool registry is **frozen** after initialization
-- To "change" a tool, regenerate it via the pipeline and commit the new source file
-
-This design treats generated tools as version-controlled project artifacts, not runtime-modifiable objects.
-
-## Runtime API
-
-Entrypoint:
-
-	create_runtime(
-		provider: str | None = None,
-		api_key: str | None = None,
-		model: str | None = None,
-		base_url: str | None = None,
-		workspace: str | None = None,
-		skills_dir: str | None = None,
-		enable_rag: bool = False,
-		rag_persist_dir: str | None = None,
-		enable_mcp: bool = False,
-		mcp_server_url: str | None = None,
-	)
-
-Run interface:
-
-runtime.run(mode, message, session_id=None, tool_plan=None)
-
-`tool_plan` accepts a list of `ToolUse` values as explicit QAOA actions.
-When `tool_plan` is omitted, Kageko only uses a skill if one is explicitly activated for the session.
-Skill generation happens only when requested (for example via `/skill generate` in the REPL).
-Tools are frozen after runtime startup and cannot be adjusted during normal usage.
-
-## Agent Mode
-
-- `AgentMode.QAOA`: unified Query -> Action -> Observation -> Answer execution
-
-When `enable_rag=True`, extra tools (`retriever.search`, `retriever.add`) are registered for QAOA actions.
+Tab-completion is available for all commands. Type `/` + Tab to see options.
 
 ## Built-in Tools
 
-The default tool pack registers:
+| Tool | Category | Risk | Description |
+|------|----------|------|-------------|
+| `echo` | system | read | Echo back text |
+| `file.read` | search | read | Read workspace files + absolute paths |
+| `file.write` | operations | write | Write files (auto-detects skill format) |
+| `bash.run` | operations | destructive | Shell execution (Git Bash / WSL / cmd) |
+| `todo.write` | operations | write | Append TODO item |
+| `todo.done` | operations | write | Mark TODO as complete |
+| `skill.load` | search | read | Load skill content |
+| `skill.describe` | search | read | Skill metadata as JSON |
+| `skill.list` | search | read | List discoverable skills |
+| `skill.generate` | generate | read | Generate QAOA UniToolCall skill |
 
-- echo
-- file.read
-- file.write
-- bash.run
-- todo.write
-- skill.load
-- skill.describe
-- skill.list
+## Skills
 
-Tool file access is restricted to the configured workspace root.
+Skills are stored as directories with `SKILL.md` inside:
 
-## Skill format compatibility
+```
+skills/
+├── brainstorming/
+│   └── SKILL.md
+├── test-driven-development/
+│   └── SKILL.md
+└── ...
+```
 
-`skill.load` keeps backward compatibility with `<name>.skill`, and now also supports
-mainstream skill layouts:
-
-1. Single-file markdown skill: `<skills_dir>/<name>.md`
-2. Directory skill: `<skills_dir>/<name>/SKILL.md`
-3. Structured manifests: `.toml`, `.json`, `.yaml`, `.yml`
-
-For markdown skills, YAML frontmatter is supported and aligned with common agent
-ecosystem conventions:
+Each skill has YAML frontmatter with QAOA UniToolCall metadata:
 
 ```markdown
 ---
-name: fundamental-analysis
-description: Analyze macro and news context for the target symbol.
+name: brainstorming
+description: Explore user intent before implementation
+category: analysis
+domain: technology
 tools:
   - file.read
   - bash.run
+permissions:
+  - read
 ---
-# Instructions
 
-1. Gather macro indicators.
-2. Summarize recent related news.
-3. Produce a concise risk-aware fundamental view.
+# Skill: brainstorming
+
+## Objective
+Turn ideas into fully formed designs.
+
+## Steps
+1. Explore project context
+2. Ask clarifying questions
+3. Propose approaches
+4. Present design
 ```
 
-`skill.describe` returns normalized JSON metadata for one skill, and `skill.list`
-returns the discoverable skills from `KAGEKO_SKILLS_DIR` and `<workspace>/skills`.
+### Skill Conversion
+
+Import skills from other agent ecosystems:
+
+```bash
+# Convert Claude Code / Superpowers skills to Kageko QAOA format
+kageko skill import ./superpowers-skills/ --format claude-code
+```
+
+### Skill Generation
+
+Skills are generated on-demand via `skill.generate`. The LLM reads a skill description and produces a complete QAOA UniToolCall skill document with proper YAML frontmatter, category, domain, tools, and step-by-step instructions.
+
+## Permission System
+
+Multi-layer pipeline: validate input → read-only auto-approve → dangerous pattern detection → user rules → mode check → session memory → interactive prompt.
+
+Modes: `default` (prompt for writes), `auto` (auto-approve all), `plan` (read-only), `bypass` (skip prompts).
+
+## Streaming
+
+```bash
+kageko chat --stream "Read SPEC.md and build the project"
+```
+
+Text tokens appear in real-time. Tool calls show inline with results.
+
+## Test Workspace
+
+The `test/` directory (outside the project) contains an external workspace for end-to-end testing:
+
+```bash
+cd test
+kageko
+```
+
+A test task that exercises the full pipeline:
+
+1. Read SPEC.md
+2. Discover external superpowers skills from disk
+3. Convert them to Kageko QAOA UniToolCall format via `skill.generate`
+4. Apply the generated skill to build a project (e.g., a CLI tool)
+5. Verify with `bash.run`
+
+Example SPEC that was successfully executed (9 turns, 0 errors):
+
+```
+Read the brainstorming superpowers skill from disk →
+skill.generate to convert to QAOA format →
+use the skill to design hello.py →
+write hello.py →
+test with bash.run
+```
 
 ## Environment Variables
 
-- KAGEKO_PROVIDER
-- OPENAI_API_KEY
-- DEEPSEEK_API_KEY
-- CLAUDE_API_KEY
-- ANTHROPIC_API_KEY
-- GEMINI_API_KEY
-- GOOGLE_API_KEY
-- KAGEKO_API_KEY
-- KAGEKO_MODEL
-- KAGEKO_BASE_URL
-- KAGEKO_WORKSPACE
-- KAGEKO_SKILLS_DIR
+- `KAGEKO_PROVIDER` / `KAGEKO_API_KEY` / `KAGEKO_MODEL`
+- `KAGEKO_BASE_URL` / `KAGEKO_WORKSPACE` / `KAGEKO_SKILLS_DIR`
+- `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` / `CLAUDE_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY`
 
-Local echo mode is intentionally disabled. Configure one provider (`openai`,
-`deepseek`, `claude`, or `gemini`) with a valid API key.
+## QAOA Data Pipeline
 
-The runtime also loads values from .env, including PowerShell-style assignments.
+```bash
+kageko pipeline generate-data --type single-hop --count 50 --output data/qaoa_single.jsonl
+kageko pipeline generate-data --type multi-hop --count 20 --output data/qaoa_multi.jsonl
+kageko pipeline generate-data --type multi-turn --count 10 --output data/qaoa_multiturn.jsonl
 
-## RAG Setup (QAOA tools)
-
-	runtime = create_runtime(
-		provider="openai",
-		model="gpt-4.1-mini",
-		enable_rag=True,
-		rag_persist_dir="./.kageko-rag",
-	)
-
-Documents are stored in the `kageko_docs` ChromaDB collection and can be queried via `retriever.search`.
-
-## Extension Modules
-
-Public exports for advanced integration:
-
-- MCPClient, MCPToolAdapter
-These are extension surfaces around the QAOA runtime.
+kageko-qaoa synth --output data/qaoa_train.jsonl --sft-output data/sft_train.jsonl
+kageko-qaoa benchmark --input data/qaoa_train.jsonl --output data/pred.jsonl --provider openai
+kageko-qaoa eval --reference data/qaoa_train.jsonl --predicted data/pred.jsonl
+```
 
 ## Contributions
-Currently this project is just at very beginnig. So all formed contributions are welcomed.
-Both a issue and a pr could make this project better.
+
+Currently at early stage. Issues and PRs welcome.

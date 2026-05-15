@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..types import SkillSpec
 
 
 class ContextManager:
@@ -13,10 +17,25 @@ class ContextManager:
         self.workspace = workspace
 
     def load(self) -> str:
+        return self.build_system_context()
+
+    def build_system_context(self, skill: SkillSpec | None = None) -> str:
+        """Build the full system context with optional skill instructions."""
         parts: list[str] = []
         agents_md = self._load_agents_md()
         if agents_md:
             parts.append("# Workspace Instructions\n" + agents_md)
+        if skill is not None:
+            parts.append(
+                f"# Active Skill: {skill.name}\n"
+                f"## Description\n{skill.description}\n\n"
+                f"## Instructions\n{skill.instructions}"
+            )
+            if skill.allowed_tools:
+                parts.append(
+                    f"## Available Tools\n"
+                    + "\n".join(f"- {t}" for t in skill.allowed_tools)
+                )
         git_status = self._load_git_status()
         if git_status:
             parts.append("# Git Status\n" + git_status)

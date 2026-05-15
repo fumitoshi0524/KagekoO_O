@@ -10,6 +10,10 @@ from qaoa.types import (
     QAOASkill,
     QAOAObservation,
     QAOATurn,
+    SkillSpec,
+    SkillAction,
+    UserPermission,
+    skill_from_qaoa,
     ToolUse,
 )
 from qaoa.learning import (
@@ -23,6 +27,9 @@ from qaoa.learning import (
     load_toolset_json,
     synthesize_qaoa_turns,
 )
+from qaoa.skills.registry import SkillRegistry
+from qaoa.skills.loader import SkillLoader
+from qaoa.skills.convert import SkillConverter, ClaudeCodeConverter, SuperpowersConverter
 from qaoa.adapters.mcp import MCPClient, MCPToolAdapter
 from qaoa.adapters.rag import VectorStore
 from qaoa.runtime import KagekoRuntime, create_runtime
@@ -37,10 +44,19 @@ __all__: list[str] = [
     "QAOASkill",
     "QAOAObservation",
     "QAOATurn",
+    "SkillSpec",
+    "SkillAction",
+    "UserPermission",
+    "skill_from_qaoa",
     "QAOAEvalMetrics",
     "ToolUse",
     "KagekoRuntime",
     "create_runtime",
+    "SkillRegistry",
+    "SkillLoader",
+    "SkillConverter",
+    "ClaudeCodeConverter",
+    "SuperpowersConverter",
     "VectorStore",
     "MCPClient",
     "MCPToolAdapter",

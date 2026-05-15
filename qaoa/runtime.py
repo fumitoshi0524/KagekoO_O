@@ -6,18 +6,19 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 import re
+from typing import Iterator
 
 from dotenv import find_dotenv, load_dotenv
 
-from .adapters.builtins import BuiltinToolPack
+from .tools.builtins import register_builtin_tools
+from .tools.registry import ToolRegistry
 from .adapters.llm import create_llm_adapter
-from .adapters.loader import GeneratedToolPack
 from .adapters.memory import InMemorySessionStore
-from .adapters.tools import ToolRegistry
 from .context import ContextManager
 from .engine import QAOAEngine
 from .pipeline.core import PipelineCore, PipelineResult, QAOADataResult, QualityEvalResult
-from .types import AgentMode, AgentRequest, AgentResponse, QAOASkill, ToolUse
+from .skills.registry import SkillRegistry
+from .types import AgentMode, AgentRequest, AgentResponse, SkillSpec, QAOASkill, ToolUse, skill_from_qaoa
 
 _POWERSHELL_ENV_PATTERN = re.compile(
     r"\$env:([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\r\n$#]+))"
@@ -56,8 +57,8 @@ class KagekoRuntime:
     provider: str
     model: str | None
     _api_key: str
-    skills: dict[str, QAOASkill]
-    active_skills: dict[str, str]
+    skill_registry: SkillRegistry
+    _active_skills: dict[str, str]  # session_id -> skill_name  (legacy compat)
 
     def run(
         self,
@@ -67,17 +68,31 @@ class KagekoRuntime:
         tool_plan: list[ToolUse] | None = None,
         skill_name: str | None = None,
         generate_skill: bool = False,
+        permission_callback: object | None = None,
     ) -> AgentResponse:
         if mode != AgentMode.QAOA:
             raise ValueError("Only qaoa mode is supported in this version.")
         request = AgentRequest(message=message, session_id=session_id, tool_plan=tool_plan or [])
         history = self.memory.read(session_id) if session_id is not None else []
         selected_skill = self._resolve_skill(session_id=session_id, skill_name=skill_name)
+        # Convert SkillSpec to QAOASkill for engine backward compat
+        engine_skill: QAOASkill | None = None
+        if selected_skill is not None:
+            if hasattr(selected_skill, 'instructions'):
+                engine_skill = QAOASkill(
+                    name=selected_skill.name,
+                    objective=selected_skill.description,
+                    tools=selected_skill.allowed_tools,
+                    steps=[selected_skill.instructions],
+                )
+            elif isinstance(selected_skill, QAOASkill):
+                engine_skill = selected_skill
         turn, trace = self.engine.run(
             query=request.query,
             tool_plan=request.tool_plan,
-            skill=selected_skill,
+            skill=engine_skill,
             allow_skill_generation=generate_skill,
+            permission_callback=permission_callback,
         )
         if session_id is not None:
             self.memory.append(session_id, request.query)
@@ -89,45 +104,101 @@ class KagekoRuntime:
             tools=_to_tools(turn),
         )
 
-    def generate_skill(self, *, name: str, objective: str) -> QAOASkill:
+    def generate_skill(self, *, name: str, objective: str) -> SkillSpec:
         key = name.strip()
         if key == "":
             raise ValueError("Skill name cannot be empty.")
-        skill = self.engine.generate_skill(objective=objective)
-        materialized = QAOASkill(
+        qaoa_skill = self.engine.generate_skill(objective=objective)
+        spec = SkillSpec(
             name=key,
-            objective=skill.objective,
-            tools=skill.tools,
-            steps=skill.steps,
+            description=qaoa_skill.objective if isinstance(qaoa_skill, QAOASkill) else objective,
+            instructions="\n".join(f"{i}. {s}" for i, s in enumerate(getattr(qaoa_skill, 'steps', []), 1)),
+            allowed_tools=getattr(qaoa_skill, 'tools', []),
+            format="qaoa-generated",
         )
-        self.skills[key] = materialized
-        return materialized
+        self.skill_registry.register(spec)
+        return spec
 
-    def list_skills(self) -> list[QAOASkill]:
-        return [self.skills[name] for name in sorted(self.skills)]
+    def run_stream(
+        self,
+        mode: AgentMode,
+        message: str,
+        session_id: str | None = None,
+        skill_name: str | None = None,
+        permission_callback: object | None = None,
+    ) -> Iterator:
+        """Streaming QAOA execution — yields StreamEvent for real-time display."""
+        if mode != AgentMode.QAOA:
+            raise ValueError("Only qaoa mode is supported.")
+        selected_skill = self._resolve_skill(session_id=session_id, skill_name=skill_name)
+        engine_skill = None
+        if selected_skill is not None:
+            if hasattr(selected_skill, 'instructions'):
+                engine_skill = QAOASkill(
+                    name=selected_skill.name, objective=selected_skill.description,
+                    tools=selected_skill.allowed_tools, steps=[selected_skill.instructions],
+                )
+            elif isinstance(selected_skill, QAOASkill):
+                engine_skill = selected_skill
+
+        yield from self.engine.run_stream(
+            query=message, skill=engine_skill,
+            permission_callback=permission_callback,
+        )
+
+        if session_id is not None:
+            self.memory.append(session_id, message)
+
+    def generate_skill_on_demand(self, query: str) -> SkillSpec | None:
+        """Generate a skill from a user query and register it."""
+        from .skills.generator import SkillGenerator
+        from pathlib import Path
+
+        generator = SkillGenerator(
+            llm=self.engine.llm,
+            tools=self.tools,
+            output_dir=Path(self.engine.tools._specs.get("skill.load") and self.engine._workspace
+                            if hasattr(self.engine, '_workspace') else Path.cwd()) / "skills",
+        )
+        try:
+            skill = generator.generate(query)
+        except Exception:
+            return None
+        self.skill_registry.register(skill)
+        return skill
+
+    def list_skills(self) -> list[SkillSpec]:
+        return self.skill_registry.list_all()
 
     def activate_skill(self, *, session_id: str, name: str) -> None:
-        if name not in self.skills:
-            raise ValueError(f"Skill '{name}' is not found.")
-        self.active_skills[session_id] = name
+        skill = self.skill_registry.get(name)
+        if skill is None:
+            raise ValueError(f"Skill '{name}' is not registered.")
+        self._active_skills[session_id] = name
 
     def clear_active_skill(self, *, session_id: str) -> None:
-        if session_id in self.active_skills:
-            del self.active_skills[session_id]
+        if session_id in self._active_skills:
+            del self._active_skills[session_id]
 
-    def get_active_skill(self, *, session_id: str) -> QAOASkill | None:
-        skill_name = self.active_skills.get(session_id)
+    def get_active_skill(self, *, session_id: str) -> SkillSpec | None:
+        skill_name = self._active_skills.get(session_id)
         if skill_name is None:
             return None
-        return self.skills.get(skill_name)
+        return self.skill_registry.get(skill_name)
+
+    def search_skills(self, query: str) -> list[SkillSpec]:
+        return self.skill_registry.search(query)
+
+    def find_matching_skills(self, query: str) -> list[SkillSpec]:
+        return self.skill_registry.find_matching(query)
 
     def list_sessions(self) -> list[str]:
         return self.memory.list_sessions()
 
     def clear_session(self, *, session_id: str) -> None:
         self.memory.clear(session_id)
-        if session_id in self.active_skills:
-            del self.active_skills[session_id]
+        if session_id in self._active_skills:
+            del self._active_skills[session_id]
 
     def generate_tool_via_pipeline(
         self,
@@ -247,18 +318,24 @@ class KagekoRuntime:
 
     def _resolve_skill(
         self, *, session_id: str | None, skill_name: str | None
-    ) -> QAOASkill | None:
+    ) -> SkillSpec | QAOASkill | None:
+        # Check explicit skill_name first (from SkillRegistry)
         if skill_name is not None and skill_name.strip() != "":
-            resolved = self.skills.get(skill_name)
-            if resolved is None:
-                raise ValueError(f"Skill '{skill_name}' is not found.")
-            return resolved
+            resolved = self.skill_registry.get(skill_name)
+            if resolved is not None:
+                return resolved
+            # Fall back to engine's legacy QAOA skill generation
+            engine_skill = self.engine._generate_skill(skill_name)
+            if engine_skill is not None:
+                return engine_skill
+            raise ValueError(f"Skill '{skill_name}' is not found and could not be generated.")
+        # Check session-level active skill
         if session_id is None:
             return None
-        active_name = self.active_skills.get(session_id)
+        active_name = self._active_skills.get(session_id)
         if active_name is None:
             return None
-        return self.skills.get(active_name)
+        return self.skill_registry.get(active_name)
 
 
 def create_runtime(
@@ -352,14 +429,26 @@ def create_runtime(
         Path(configured_skills).resolve() if configured_skills else None
     )
 
-    tools = ToolRegistry()
-    BuiltinToolPack(
-        workspace=runtime_workspace, skills_dir=runtime_skills_dir
-    ).register(tools)
+    # ── Create LLM first so tools can use it ─────────────────────
+    llm = create_llm_adapter(
+        provider=normalized_provider,
+        api_key=resolved_api_key,
+        model=resolved_model,
+        base_url=resolved_base_url,
+    )
 
-    # Auto-load generated tools from workspace/tools directory
-    generated_tools_dir = runtime_workspace / "tools"
-    GeneratedToolPack(tools_dir=generated_tools_dir).register(tools)
+    # ── Skill registry ───────────────────────────────────────────
+    skill_registry = SkillRegistry()
+
+    # ── Register built-in tools ──────────────────────────────────
+    tools = ToolRegistry()
+    skill_loader = register_builtin_tools(
+        tools, workspace=runtime_workspace, skills_dir=runtime_skills_dir,
+        llm=llm, skill_registry=skill_registry,
+    )
+    for spec in skill_loader.load_all():
+        skill_registry.register(spec)
+    skill_registry.bind_tools(tools)
 
     # Optional RAG setup
     retriever = None
@@ -402,7 +491,7 @@ def create_runtime(
 
     # Optional MCP setup
     if enable_mcp and mcp_server_url:
-        from .adapters.mcp import MCPClient, MCPToolAdapter
+        from .mcp.client import MCPClient, MCPToolAdapter
 
         mcp_client = MCPClient(server_url=mcp_server_url)
         mcp_client.connect()
@@ -416,17 +505,11 @@ def create_runtime(
 
     # Runtime toolset is immutable; tool evolution is code/training time only.
     tools.freeze()
-
-    llm = create_llm_adapter(
-        provider=normalized_provider,
-        api_key=resolved_api_key,
-        model=resolved_model,
-        base_url=resolved_base_url,
-    )
     persist_dir = Path.home() / ".kageko" / "sessions"
     memory = InMemorySessionStore(persist_dir=persist_dir)
     context = ContextManager(workspace=runtime_workspace).load()
-    engine = QAOAEngine(llm=llm, tools=tools, retriever=retriever, context=context)
+    engine = QAOAEngine(llm=llm, tools=tools, retriever=retriever, context=context,
+                        provider=normalized_provider, model=resolved_model)
     return KagekoRuntime(
         engine=engine,
         tools=tools,
@@ -434,8 +517,8 @@ def create_runtime(
         provider=normalized_provider,
         model=resolved_model,
         _api_key=resolved_api_key or "",
-        skills={},
-        active_skills={},
+        skill_registry=skill_registry,
+        _active_skills={},
     )
 
 

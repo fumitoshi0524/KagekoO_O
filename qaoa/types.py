@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
+from typing import Any
 
 # UniToolCall functional categories (arXiv:2604.11557 Section 3.1)
 FUNCTIONAL_CATEGORIES: tuple[str, ...] = (
@@ -37,6 +39,8 @@ class AgentMode(StrEnum):
     QAOA = "qaoa"
 
 
+# ── Tool types (execution primitives behind skills) ──────────────────
+
 @dataclass(slots=True, kw_only=True)
 class ToolUse:
     name: str
@@ -56,6 +60,8 @@ class QAOAObservation:
     output: str
 
 
+# ── QAOA Skill (legacy, kept for backward compat) ────────────────────
+
 @dataclass(slots=True, kw_only=True)
 class QAOASkill:
     name: str
@@ -64,14 +70,71 @@ class QAOASkill:
     steps: list[str] = field(default_factory=list)
 
 
+# ── Skill System (primary abstraction) ───────────────────────────────
+
+@dataclass(slots=True, kw_only=True)
+class SkillSpec:
+    """Kageko-native skill — the primary agent abstraction.
+
+    Superset of Claude Code's markdown+YAML frontmatter format.
+    """
+    name: str
+    description: str
+    instructions: str
+    allowed_tools: list[str] = field(default_factory=list)
+    permissions: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    source_path: Path | None = None
+    format: str = "kageko-native"
+
+
+@dataclass(slots=True, kw_only=True)
+class SkillAction:
+    """An action taken during skill execution."""
+    skill_name: str
+    action_type: str  # "tool_call" | "think" | "respond" | "ask_user"
+    tool_name: str | None = None
+    tool_input: str | None = None
+
+
+@dataclass(slots=True, kw_only=True)
+class UserPermission:
+    """Permission request for a risky operation."""
+    skill_name: str
+    tool_name: str
+    risk_level: str
+    description: str
+    granted: bool = False
+
+
+def skill_from_qaoa(qaoa_skill: QAOASkill, /) -> SkillSpec:
+    """Convert a legacy QAOASkill to the new SkillSpec format."""
+    if qaoa_skill.steps:
+        steps_text = "\n".join(f"{i}. {s}" for i, s in enumerate(qaoa_skill.steps, 1))
+        instructions = f"Objective: {qaoa_skill.objective}\n\nSteps:\n{steps_text}"
+    else:
+        instructions = f"Objective: {qaoa_skill.objective}"
+    return SkillSpec(
+        name=qaoa_skill.name,
+        description=qaoa_skill.objective,
+        instructions=instructions,
+        allowed_tools=list(qaoa_skill.tools),
+        format="qaoa-legacy",
+    )
+
+
+# ── QAOA Turn types ──────────────────────────────────────────────────
+
 @dataclass(slots=True, kw_only=True)
 class QAOATurn:
     query: str
-    skill: QAOASkill | None = None
+    skill: SkillSpec | QAOASkill | None = None
     actions: list[QAOAAction] = field(default_factory=list)
     observations: list[QAOAObservation] = field(default_factory=list)
     answer: str = ""
 
+
+# ── Request / Response ───────────────────────────────────────────────
 
 @dataclass(slots=True, kw_only=True)
 class AgentRequest:

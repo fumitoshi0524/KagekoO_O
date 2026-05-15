@@ -10,6 +10,9 @@ from .learning import (
     synthesize_qaoa_turns,
 )
 from .runtime import KagekoRuntime, create_runtime
+from .skills.registry import SkillRegistry
+from .skills.loader import SkillLoader
+from .skills.convert import SkillConverter, ClaudeCodeConverter, SuperpowersConverter
 from .types import (
     AgentMode,
     AgentRequest,
@@ -18,6 +21,10 @@ from .types import (
     QAOASkill,
     QAOAObservation,
     QAOATurn,
+    SkillSpec,
+    SkillAction,
+    UserPermission,
+    skill_from_qaoa,
     ToolUse,
 )
 
@@ -25,6 +32,11 @@ __all__: list[str] = [
     "QAOAEngine",
     "KagekoRuntime",
     "create_runtime",
+    "SkillRegistry",
+    "SkillLoader",
+    "SkillConverter",
+    "ClaudeCodeConverter",
+    "SuperpowersConverter",
     "AgentMode",
     "AgentRequest",
     "AgentResponse",
@@ -32,6 +44,10 @@ __all__: list[str] = [
     "QAOASkill",
     "QAOAObservation",
     "QAOATurn",
+    "SkillSpec",
+    "SkillAction",
+    "UserPermission",
+    "skill_from_qaoa",
     "ToolUse",
     "QAOAEvalMetrics",
     "synthesize_qaoa_turns",
