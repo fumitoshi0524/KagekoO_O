@@ -20,28 +20,29 @@ if TYPE_CHECKING:
 
 QAOA_SKILL_PROMPT = """You are a skill designer for Kageko Agent. Create a skill following the UniToolCall standard (arXiv:2604.11557).
 
-The skill must follow this structure — a superpowers-style markdown skill with YAML frontmatter:
+CRITICAL: Use the exact name provided below. Do not invent a new name.
+
+The skill must follow this structure:
 
 ---
-name: snake_case_name
+name: {name}
 description: One-line summary of what this skill does
 category: {categories}
 domain: {domains}
 tools:
   - tool.name
-  - another.tool
 permissions:
   - read
   - write
 ---
 
-# Skill: <name>
+# Skill: {name}
 
 ## Objective
 Clear one-sentence goal.
 
 ## Tools
-- tool.name: when and how to use it
+- tool.name: when and how to use it. Every skill that creates or modifies files MUST include both file.write AND bash.run. Exploration skills MUST include file.read.
 
 ## Steps
 1. First step — concrete action
@@ -51,9 +52,7 @@ Clear one-sentence goal.
 ## Safety
 Any constraints or warnings.
 
-Return the COMPLETE markdown skill document (YAML frontmatter + body).
-Categories: {categories}
-Domains: {domains}
+Pick ONE category and ONE domain from the lists above that best fit this skill.
 Available tools: {tools}
 
 User request: {query}"""
@@ -69,7 +68,12 @@ class SkillGenerator:
         tool_names = [s.name for s in self.tools.list_specs()
                       if not s.name.startswith("skill.")]
 
+        # Extract requested name from query: "name: description" or just "name"
+        name = query.split(":")[0].strip().replace(" ", "_") if ":" in query else query.strip().replace(" ", "_")[:30]
+        description = query.split(":", 1)[1].strip() if ":" in query else query.strip()
+
         prompt = QAOA_SKILL_PROMPT.format(
+            name=name,
             query=query,
             tools=json.dumps(tool_names),
             categories=", ".join(FUNCTIONAL_CATEGORIES),
@@ -77,7 +81,20 @@ class SkillGenerator:
         )
 
         raw = self.llm.complete_text(prompt)
-        return self._parse_markdown_skill(raw, query)
+        skill = self._parse_markdown_skill(raw, description)
+        # Preserve the requested name over whatever the LLM generated
+        if skill.name != name:
+            skill = SkillSpec(
+                name=name,
+                description=skill.description,
+                instructions=skill.instructions,
+                allowed_tools=skill.allowed_tools,
+                permissions=skill.permissions,
+                metadata=skill.metadata,
+                source_path=skill.source_path,
+                format=skill.format,
+            )
+        return skill
 
     def _parse_markdown_skill(self, raw: str, fallback_query: str) -> SkillSpec:
         """Parse a full markdown skill document with YAML frontmatter."""

@@ -66,13 +66,13 @@ class SkillLoader:
                 continue
             for file_path in sorted(base.glob("*")):
                 if file_path.is_file() and file_path.suffix.lower() in _SKILL_FILE_EXTENSIONS:
-                    doc = self._parse(file_path, default_name=file_path.stem, strict=False)
+                    doc = self._parse(file_path=file_path, default_name=file_path.stem, strict=False)
                     discovered.setdefault(doc.name, doc)
                 elif file_path.is_dir():
                     for skill_file_name in _DIRECTORY_SKILL_FILES:
                         candidate = file_path / skill_file_name
                         if candidate.exists() and candidate.is_file():
-                            doc = self._parse(candidate, default_name=file_path.name, strict=False)
+                            doc = self._parse(file_path=candidate, default_name=file_path.name, strict=False)
                             discovered.setdefault(doc.name, doc)
                             break
         return sorted(discovered.values(), key=lambda d: d.name.lower())

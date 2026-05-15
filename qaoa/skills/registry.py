@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from ..types import SkillSpec
+from .scripts import SkillScriptLoader
 
 if TYPE_CHECKING:
     from ..adapters.tools import ToolRegistry
@@ -16,6 +17,8 @@ class SkillRegistry:
     _skills: dict[str, SkillSpec] = field(default_factory=dict)
     _active_skill: str | None = None
     _tools: ToolRegistry | None = None
+    _script_loader: SkillScriptLoader = field(default_factory=SkillScriptLoader)
+    _workspace: str = ""
 
     # ── CRUD ─────────────────────────────────────────────────────────
 
@@ -24,6 +27,7 @@ class SkillRegistry:
 
     def unregister(self, name: str) -> None:
         if name in self._skills:
+            self.deactivate_scripts(name)
             del self._skills[name]
         if self._active_skill == name:
             self._active_skill = None
@@ -43,9 +47,32 @@ class SkillRegistry:
         if name not in self._skills:
             raise ValueError(f"Skill '{name}' is not registered.")
         self._active_skill = name
+        skill = self._skills[name]
+        self._activate_scripts(skill)
 
     def deactivate(self) -> None:
+        if self._active_skill:
+            self.deactivate_scripts(self._active_skill)
         self._active_skill = None
+
+    def bind_tools(self, tools: ToolRegistry) -> None:
+        self._tools = tools
+        self._script_loader.registry = tools
+
+    # ── Script tools ─────────────────────────────────────────────────
+
+    def _activate_scripts(self, skill: SkillSpec) -> None:
+        if self._tools is None:
+            return
+        names = self._script_loader.register(skill, workspace=self._workspace)
+        if names:
+            import logging
+            logging.getLogger(__name__).debug(f"Activated script tools: {names}")
+
+    def deactivate_scripts(self, name: str) -> None:
+        skill = self._skills.get(name)
+        if skill:
+            self._script_loader.unregister(skill)
 
     def get_active(self) -> SkillSpec | None:
         if self._active_skill is None:
@@ -102,9 +129,7 @@ class SkillRegistry:
         return [skill for _, skill in scored]
 
     # ── Tool binding ─────────────────────────────────────────────────
-
-    def bind_tools(self, tools: ToolRegistry) -> None:
-        self._tools = tools
+    # (see bind_tools above — single definition)
 
     def get_tools_for_active(self) -> dict[str, object] | None:
         if self._tools is None:

@@ -234,18 +234,30 @@ def _guess_filename(content: str) -> tuple[str, bool]:
 
 
 def _find_shell() -> tuple[str, str]:
-    """Find the best available shell. Returns (executable, shell_type)."""
+    """Find the best available shell using standard discovery — no hardcoded paths."""
+    import os
     import shutil
-    # Git Bash
-    for loc in [r"C:\Program Files\Git\bin\bash.exe",
-                r"C:\Program Files (x86)\Git\bin\bash.exe",
-                r"C:\Git\bin\bash.exe"]:
-        if Path(loc).exists():
-            return loc, "bash (Git Bash)"
-    # WSL
+
+    # 1. $SHELL env var
+    env_shell = os.environ.get("SHELL", "")
+    if env_shell and Path(env_shell).exists():
+        return env_shell, f"$SHELL ({env_shell})"
+
+    # 2. shutil.which — finds bash/sh on PATH (Git Bash, MSYS2, Cygwin, WSL)
+    for name in ["bash", "zsh", "sh"]:
+        found = shutil.which(name)
+        if found:
+            return found, f"{name} (PATH)"
+
+    # 3. WSL
     if shutil.which("wsl"):
         return "wsl", "wsl"
-    # Default: cmd.exe
+
+    # 4. PowerShell on Windows
+    if os.name == "nt" and shutil.which("powershell"):
+        return "powershell", "powershell"
+
+    # 5. Fallback
     return "cmd.exe", "cmd.exe (Windows — use dir/type/cd, not ls/cat/pwd)"
 
 
@@ -258,8 +270,10 @@ def _bash_run(workspace: Path, payload: str) -> str:
         raise ValueError("bash.run payload cannot be empty.")
     if _SHELL_PATH == "wsl":
         command = f"wsl -- {command}"
+    elif _SHELL_PATH == "powershell":
+        command = f'powershell -Command "{command}"'
     elif _SHELL_PATH == "cmd.exe":
-        pass  # run directly
+        pass
     else:
         command = f'"{_SHELL_PATH}" -c "{command}"'
     completed = subprocess.run(

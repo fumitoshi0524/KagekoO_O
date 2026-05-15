@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..types import SkillSpec
+    from .types import SkillSpec
 
 
 class ContextManager:

@@ -174,10 +174,14 @@ class KagekoRuntime:
         skill = self.skill_registry.get(name)
         if skill is None:
             raise ValueError(f"Skill '{name}' is not registered.")
+        # Deactivate first to clean up old script tools, then re-activate to re-scan
+        self.skill_registry.deactivate()
+        self.skill_registry.activate(name)
         self._active_skills[session_id] = name
 
     def clear_active_skill(self, *, session_id: str) -> None:
         if session_id in self._active_skills:
+            self.skill_registry.deactivate()
             del self._active_skills[session_id]
 
     def get_active_skill(self, *, session_id: str) -> SkillSpec | None:
@@ -439,6 +443,7 @@ def create_runtime(
 
     # ── Skill registry ───────────────────────────────────────────
     skill_registry = SkillRegistry()
+    skill_registry._workspace = str(runtime_workspace)
 
     # ── Register built-in tools ──────────────────────────────────
     tools = ToolRegistry()

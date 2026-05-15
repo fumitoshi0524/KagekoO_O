@@ -2,7 +2,7 @@
 
 **English** | [中文](./README_CN.md)
 
-KagekoO_O is a QAOA-oriented agent runtime for building tool-using assistants. The runtime is built around a single canonical loop: **Query → Action → Observation → Answer**, with native function calling, streaming, and an iterative agentic execution model.
+KagekoO_O is a QAOA-oriented agent runtime for building tool-using assistants. The core loop — **Query → Action → Observation → Answer** — and skill generation pipeline are based on [UniToolCall](https://arxiv.org/abs/2604.11557) (arXiv:2604.11557). Features include native function calling, streaming, iterative agentic execution, and a multi-layer permission system.
 
 ## What This Is
 
@@ -140,56 +140,81 @@ Tab-completion is available for all commands. Type `/` + Tab to see options.
 
 ## Skills
 
-Skills are stored as directories with `SKILL.md` inside:
+Skills are directories containing a `SKILL.md` manifest, executable scripts, and reference documents:
 
 ```
-skills/
-├── brainstorming/
-│   └── SKILL.md
-├── test-driven-development/
-│   └── SKILL.md
-└── ...
+skills/<name>/
+├── SKILL.md              ← QAOA UniToolCall skill manifest
+├── scripts/              ← executable tools (one action per script)
+│   ├── step1.sh
+│   └── step2.py
+└── reference/            ← documentation for human readers
+    └── README.md
 ```
 
-Each skill has YAML frontmatter with QAOA UniToolCall metadata:
+### SKILL.md Format
+
+YAML frontmatter with QAOA UniToolCall metadata:
 
 ```markdown
 ---
-name: brainstorming
-description: Explore user intent before implementation
-category: analysis
+name: project-scaffolder
+description: Scaffold a Python CLI project structure
+category: operations
 domain: technology
 tools:
-  - file.read
+  - file.write
   - bash.run
+  - project-scaffolder.create_dirs
+  - project-scaffolder.write_cli
 permissions:
   - read
+  - write
 ---
 
-# Skill: brainstorming
+# Skill: project-scaffolder
 
 ## Objective
-Turn ideas into fully formed designs.
+Create a standardized Python CLI project layout.
+
+## Tools
+- project-scaffolder.create_dirs: Creates src/ directory structure
+- project-scaffolder.write_cli: Writes cli.py with Typer app
 
 ## Steps
-1. Explore project context
-2. Ask clarifying questions
-3. Propose approaches
-4. Present design
+1. Create project directories
+2. Write pyproject.toml
+3. Write __init__.py
+4. Write cli.py
+5. Verify with bash.run
+
+## Safety
+Only writes within the workspace.
 ```
 
-### Skill Conversion
+### Scripts as UniTool Tools
 
-Import skills from other agent ecosystems:
+Each script in `scripts/` becomes a temporary tool when the skill is activated. One script = one atomic UniToolCall action. Tools are registered on activation and removed on deactivation. The skill's `tools:` field lists them alongside built-in tools, giving the LLM a complete picture of available capabilities.
 
 ```bash
-# Convert Claude Code / Superpowers skills to Kageko QAOA format
-kageko skill import ./superpowers-skills/ --format claude-code
+# Before activation: 10 tools
+kageko tool list
+
+# /skill use project-scaffolder → 14 tools (4 script tools added)
+# /skill clear → back to 10 tools
 ```
 
 ### Skill Generation
 
-Skills are generated on-demand via `skill.generate`. The LLM reads a skill description and produces a complete QAOA UniToolCall skill document with proper YAML frontmatter, category, domain, tools, and step-by-step instructions.
+`skill.generate` produces a complete QAOA UniToolCall skill document. Names are preserved ("brainstorming" stays "brainstorming"). Tools include `file.read` for exploration, `bash.run` for execution, `file.write` for output. Scripts and references can be added afterward for richer capability.
+
+### Skill Conversion
+
+Import from other agent ecosystems:
+
+```bash
+kageko skill import ./external-skills/ --format claude-code
+```
 
 ## Permission System
 
@@ -237,6 +262,12 @@ test with bash.run
 - `KAGEKO_PROVIDER` / `KAGEKO_API_KEY` / `KAGEKO_MODEL`
 - `KAGEKO_BASE_URL` / `KAGEKO_WORKSPACE` / `KAGEKO_SKILLS_DIR`
 - `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` / `CLAUDE_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY`
+
+## Skill Generation Pipeline
+
+Skills are generated following a pipeline inspired by [UniToolCall](https://arxiv.org/abs/2604.11557) (arXiv:2604.11557). The LLM produces a complete skill document — YAML frontmatter with metadata plus structured body — which is validated, saved to `skills/<name>/SKILL.md`, and registered at runtime.
+
+This is an active area of development. When `skill.generate` produces weak output, the generator prompt and parsing are iteratively improved.
 
 ## QAOA Data Pipeline
 

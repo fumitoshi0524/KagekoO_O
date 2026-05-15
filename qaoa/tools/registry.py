@@ -63,8 +63,16 @@ class ToolRegistry:
             raise ValueError(f"Tool '{name}' is not registered.")
         return spec
 
+    def unregister(self, name: str) -> None:
+        """Remove a tool. Allowed even when frozen (for temporary tools)."""
+        self._tools.pop(name, None)
+        self._specs.pop(name, None)
+
     def freeze(self) -> None:
         self._frozen = True
+
+    def unfreeze(self) -> None:
+        self._frozen = False
 
     @property
     def is_frozen(self) -> bool:

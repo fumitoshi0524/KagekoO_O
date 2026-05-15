@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Iterator
 
 from .adapters.llm import tool_spec_to_schema, build_name_map, ToolSchema, ToolCallResult
 from .types import QAOAAction, QAOAObservation, QAOASkill, QAOATurn, ToolUse, SkillSpec
