@@ -2,32 +2,16 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
+from rich import box
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
-from rich import box
 
+from .config import load_global_config, save_global_config
 
 console = Console()
-
-
-def load_global_config() -> dict:
-    path = Path.home() / ".kageko" / "config.json"
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8-sig"))
-    except (json.JSONDecodeError, OSError):
-        return {}
-
-
-def save_global_config(config: dict) -> None:
-    path = Path.home() / ".kageko" / "config.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 def run_setup_wizard() -> tuple[str, str]:
@@ -56,5 +40,5 @@ def run_setup_wizard() -> tuple[str, str]:
     save_global_config(config)
     console.print(f"\n[bold green]✓ Configuration saved[/bold green] to [dim]{Path.home() / '.kageko' / 'config.json'}[/dim]")
     console.print(f"   Provider: [bold]{provider}[/bold]")
-    console.print(f"   You can now run [bold]kageko[/bold] without any arguments.\n")
+    console.print("   You can now run [bold]kageko[/bold] without any arguments.\n")
     return provider, api_key

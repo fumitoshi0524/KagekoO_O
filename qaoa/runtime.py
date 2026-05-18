@@ -60,6 +60,10 @@ class KagekoRuntime:
     skill_registry: SkillRegistry
     _active_skills: dict[str, str]  # session_id -> skill_name  (legacy compat)
 
+    def run_sync(self, message: str, *, session_id: str | None = None) -> AgentResponse:
+        """Convenience wrapper: run in QAOA mode with sensible defaults."""
+        return self.run(mode=AgentMode.QAOA, message=message, session_id=session_id)
+
     def run(
         self,
         mode: AgentMode,
@@ -94,6 +98,23 @@ class KagekoRuntime:
             allow_skill_generation=generate_skill,
             permission_callback=permission_callback,
         )
+
+        # Lifecycle automation: register generated skills for the session
+        if "qaoa:skill_generated" in trace and turn.skill is not None:
+            generated = turn.skill
+            if isinstance(generated, QAOASkill):
+                spec = skill_from_qaoa(generated)
+                self.skill_registry.register(spec)
+                if session_id is not None:
+                    self._active_skills[session_id] = spec.name
+            elif hasattr(generated, 'name'):
+                try:
+                    self.skill_registry.register(generated)
+                except Exception:
+                    pass
+                if session_id is not None and hasattr(generated, 'name'):
+                    self._active_skills[session_id] = generated.name
+
         if session_id is not None:
             self.memory.append(session_id, request.query)
             self.memory.append(session_id, turn.answer)
@@ -354,6 +375,7 @@ def create_runtime(
     rag_persist_dir: str | None = None,
     enable_mcp: bool = False,
     mcp_server_url: str | None = None,
+    mcp_servers: list[dict[str, object]] | None = None,
 ) -> KagekoRuntime:
     _load_environment()
 
@@ -495,18 +517,45 @@ def create_runtime(
         )
 
     # Optional MCP setup
-    if enable_mcp and mcp_server_url:
+    mcp_client = None
+    if enable_mcp:
         from .mcp.client import MCPClient, MCPToolAdapter
 
-        mcp_client = MCPClient(server_url=mcp_server_url)
-        mcp_client.connect()
-        mcp_adapter = MCPToolAdapter(mcp_client=mcp_client)
+        mcp_client = MCPClient()
 
-        # Register MCP tools
-        for tool_name in mcp_client.list_tools():
-            tools.register(
-                f"mcp.{tool_name}", lambda p, n=tool_name: mcp_adapter.call(n, p)
+        # Legacy: URL-based MCP connection (deprecated, prefer mcp_servers list)
+        if mcp_server_url and not mcp_servers:
+            import logging
+            logging.getLogger(__name__).warning(
+                "mcp_server_url is deprecated. Use mcp_servers list with stdio transport."
             )
+            # Construct a pseudo-server entry from URL
+            mcp_servers = [{"name": "default", "command": mcp_server_url}]
+
+        if mcp_servers:
+            for server_config in mcp_servers:
+                server_name = str(server_config.get("name", "unnamed"))
+                command = str(server_config.get("command", ""))
+                args_list = server_config.get("args")
+                if isinstance(args_list, list):
+                    args_list = [str(a) for a in args_list]
+                else:
+                    args_list = None
+
+                try:
+                    mcp_client.connect_stdio(
+                        name=server_name,
+                        command=command,
+                        args=args_list,
+                    )
+                    discovered = mcp_client.discover_tools(server_name)
+                    for mcp_tool in discovered:
+                        tools.register_from_mcp(mcp_tool)
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        f"Failed to connect MCP server '{server_name}': {e}"
+                    )
 
     # Runtime toolset is immutable; tool evolution is code/training time only.
     tools.freeze()

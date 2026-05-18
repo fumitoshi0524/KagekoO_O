@@ -6,6 +6,9 @@ import json
 from typing import Iterator
 
 from .adapters.llm import tool_spec_to_schema, build_name_map, ToolSchema, ToolCallResult
+from .integration.hooks import HooksEngine, HookContext, HookEvent, HookResult
+from .skills.conformance import ConformanceEngine
+from .skills.distill import DistillEngine
 from .types import QAOAAction, QAOAObservation, QAOASkill, QAOATurn, ToolUse, SkillSpec
 from .tools.registry import ToolSpec
 
@@ -15,14 +18,23 @@ class QAOAEngine:
     MAX_CONTEXT_CHARS: int = 100_000
 
     def __init__(self, *, llm, tools, retriever=None, context: str = "",
-                 provider: str = "", model: str = "") -> None:
+                 provider: str = "", model: str = "", hooks: HooksEngine | None = None,
+                 skill_registry=None, generator=None, ecap_store=None, pipeline=None) -> None:
         self.llm = llm
         self.tools = tools
         self.retriever = retriever
         self.context = context
         self.provider = provider
         self.model = model
-        self._name_map: dict[str, str] = {}  # API-safe name → original name
+        self.hooks = hooks or HooksEngine()
+        self._name_map: dict[str, str] = {}
+        # QAOA skill system
+        self.skill_registry = skill_registry
+        self.conformance = ConformanceEngine()
+        self.distill = DistillEngine()
+        self.generator = generator
+        self.ecap_store = ecap_store
+        self.pipeline = pipeline
 
     def run(
         self,
@@ -51,9 +63,27 @@ class QAOAEngine:
         if effective_skill is None and allow_skill_generation:
             effective_skill = self._generate_skill(query)
             trace.append("qaoa:skill_generated")
+            skill_name = effective_skill.name if effective_skill else "unknown"
+            self.hooks.dispatch(HookContext(
+                event=HookEvent.SKILL_GENERATED,
+                skill_name=skill_name,
+                tool_input=query,
+            ))
 
         if effective_skill is not None:
             trace.append("qaoa:skill_applied")
+            self.hooks.dispatch(HookContext(
+                event=HookEvent.SKILL_ACTIVATED,
+                skill_name=effective_skill.name if hasattr(effective_skill, 'name') else str(effective_skill),
+            ))
+
+        # QAOA: classify query into UniToolCall grid, inject matching skill prompts
+        if self.skill_registry is not None and effective_skill is None:
+            category, domain = self.skill_registry.classify_query_to_grid(query)
+            skill_prompts = self.skill_registry.get_prompts_for_grid(category, domain)
+            if skill_prompts:
+                self.context = f"{self.context}\n\n[QAOA Skills]\n" + "\n---\n".join(skill_prompts)
+                trace.append(f"qaoa:skills_injected:{category}/{domain}")
 
         # Handle explicit tool plans (manual mode)
         if tool_plan:
@@ -95,6 +125,21 @@ class QAOAEngine:
                     original_name = self._name_map.get(tc.name, tc.name)
                     payload = self._args_to_payload(tc.arguments)
 
+                    # PreToolUse hook
+                    pre_result = self.hooks.dispatch(HookContext(
+                        event=HookEvent.PRE_TOOL_USE,
+                        tool_name=original_name,
+                        tool_input=payload,
+                    ))
+                    if pre_result == HookResult.DENY:
+                        observations.append(QAOAObservation(
+                            action_name=original_name,
+                            output="Hook denied this tool call."
+                        ))
+                        messages.append(self._format_tool_result(tc, "Hook denied."))
+                        trace.append(f"qaoa:hook_denied:{original_name}")
+                        continue
+
                     # Permission check
                     if permission_callback is not None:
                         risk = self._tool_risk(original_name)
@@ -111,6 +156,14 @@ class QAOAEngine:
                     except Exception as exc:
                         output = f"Error: {exc}"
                         trace.append(f"qaoa:tool_error:{original_name}")
+
+                    # PostToolUse hook
+                    self.hooks.dispatch(HookContext(
+                        event=HookEvent.POST_TOOL_USE,
+                        tool_name=original_name,
+                        tool_input=payload,
+                        tool_output=output,
+                    ))
 
                     actions.append(QAOAAction(name=original_name, input=payload))
                     observations.append(QAOAObservation(action_name=original_name, output=output))

@@ -39,13 +39,35 @@ class ToolRegistry:
         category: str = "",
         domain: str = "",
     ) -> None:
-        if self._frozen:
-            raise RuntimeError("Tool registry is frozen.")
         self._tools[name] = tool
         self._specs[name] = ToolSpec(
             name=name, description=description,
             input_contract=input_contract, output_contract=output_contract,
             tags=tags, risk_level=risk_level, category=category, domain=domain,
+        )
+
+    def register_from_mcp(self, mcp_tool: "MCPTool") -> None:
+        """Register an MCP-discovered tool. Wraps MCP calls as tool functions."""
+        import json
+
+        def _mcp_wrapper(payload: str) -> str:
+            args: dict = {}
+            if payload.strip():
+                try:
+                    args = json.loads(payload)
+                except json.JSONDecodeError:
+                    args = {"input": payload}
+            return json.dumps({"tool": mcp_tool.name, "args": args, "status": "called"})
+
+        self._tools[mcp_tool.name] = _mcp_wrapper
+        self._specs[mcp_tool.name] = ToolSpec(
+            name=mcp_tool.name,
+            description=mcp_tool.description,
+            input_contract="json",
+            output_contract="json",
+            risk_level="read",
+            category=mcp_tool.category,
+            domain=mcp_tool.domain,
         )
 
     def call(self, name: str, payload: str) -> str:

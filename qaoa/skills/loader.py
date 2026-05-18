@@ -13,6 +13,7 @@ import tomllib
 from typing import Any
 
 from ..types import SkillSpec
+from .conformance import ConformanceEngine
 
 _SKILL_FILE_EXTENSIONS: tuple[str, ...] = (
     ".skill", ".md", ".markdown", ".toml", ".json", ".yaml", ".yml",
@@ -40,6 +41,7 @@ class SkillDocument:
 class SkillLoader:
     def __init__(self, skills_dirs: list[Path] | None = None) -> None:
         self._skills_dirs: list[Path] = skills_dirs or []
+        self._conformance = ConformanceEngine()
 
     def add_dir(self, path: Path) -> None:
         if path not in self._skills_dirs:
@@ -47,7 +49,14 @@ class SkillLoader:
 
     def load_all(self) -> list[SkillSpec]:
         documents = self._discover_all()
-        return [self._document_to_spec(doc) for doc in documents]
+        specs = [self._document_to_spec(doc) for doc in documents]
+        for spec in specs:
+            result = self._conformance.validate(spec)
+            spec.metadata["conformance_passed"] = result.passed
+            spec.metadata["conformance_score"] = result.score
+            if not result.passed:
+                spec.metadata["conformance_issues"] = result.issues
+        return specs
 
     def load_one(self, name: str) -> SkillSpec:
         document = self._resolve(name)

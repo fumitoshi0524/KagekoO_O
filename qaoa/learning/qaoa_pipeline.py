@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import re
 
-from .types import QAOAAction, QAOAObservation, QAOASkill, QAOATurn
+from ..types import QAOAAction, QAOAObservation, QAOASkill, QAOATurn, EvalScore
 
 
 _SPACE_PATTERN = re.compile(r"\s+")
@@ -439,3 +439,13 @@ def _render_qaoa_prompt(
         )
     parts.append("Answer:")
     return "\n\n".join(parts)
+
+
+def evaluate_skill_trajectories(
+    *,
+    skill_name: str,
+    reference: dict[str, list[QAOATurn]],
+    predicted: dict[str, list[QAOATurn]],
+) -> QAOAEvalMetrics:
+    """Evaluate how well a skill's trajectories match reference data."""
+    return evaluate_qaoa_predictions(reference=reference, predicted=predicted)

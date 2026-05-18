@@ -1,22 +1,45 @@
-# Python-generated files
+# Python
 __pycache__/
-*.py[oc]
+*.py[cod]
+*.egg-info/
+dist/
 build/
-/dist/
-wheels/
-*.egg-info
+*.egg
 
-# Virtual environments
-.venv
+# Virtual environment
+.venv/
 
-# vscode settings
+# IDE / editor
 .vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment & secrets
 .env
+.env.local
+*.pem
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test & coverage
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# Kageko runtime data (local, not committed)
+# skills/  (uncomment if you store generated skills outside the repo)
+
+# CC related files
+.claude/plans/
+CLAUDE.md
+AGENTS.md
 
 # uv generated files
 uv.lock
-.python-version
-
-# AI assistant files (developer-local, not committed)
-CLAUDE.md
-AGENTS.md

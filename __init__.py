@@ -18,7 +18,7 @@ from .qaoa.learning import (
     load_qaoa_jsonl,
     synthesize_qaoa_turns,
 )
-from .qaoa.adapters.mcp import MCPClient, MCPToolAdapter
+from .qaoa.mcp.client import MCPClient, MCPToolAdapter
 from .qaoa.adapters.rag import VectorStore
 from .qaoa.runtime import KagekoRuntime, create_runtime
 

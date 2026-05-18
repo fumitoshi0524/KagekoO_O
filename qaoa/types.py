@@ -123,6 +123,42 @@ def skill_from_qaoa(qaoa_skill: QAOASkill, /) -> SkillSpec:
     )
 
 
+# ── Conformance & Evaluation types ────────────────────────────────────
+
+@dataclass(slots=True, frozen=True, kw_only=True)
+class ConformanceResult:
+    """Result of skill conformance validation against UniToolCall standard."""
+    passed: bool
+    reason: str = ""
+    issues: list[str] = field(default_factory=list)
+    score: float = 0.0  # 0.0–1.0 conformance score
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
+class EvalScore:
+    """Evaluation scores for a skill against benchmark queries."""
+    toolfit: float       # how well tools match the query domain
+    clarity: float       # how clear the instruction steps are
+    naturalness: float   # how natural the QAOA flow is
+
+    @property
+    def average(self) -> float:
+        return (self.toolfit + self.clarity + self.naturalness) / 3.0
+
+    def passes(self, threshold: float = 7.0) -> bool:
+        return self.average >= threshold
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
+class RegenerationFeedback:
+    """Feedback from evaluation to drive skill regeneration."""
+    query: str
+    expected_tools: list[str]
+    observed_tools: list[str]
+    eval_score: EvalScore
+    suggestions: str = ""
+
+
 # ── QAOA Turn types ──────────────────────────────────────────────────
 
 @dataclass(slots=True, kw_only=True)

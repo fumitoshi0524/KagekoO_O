@@ -251,6 +251,34 @@ class PipelineCore:
             details=parsed,
         )
 
+    # ── Skill Evaluation ─────────────────────────────────────────────
+
+    def evaluate_skill(
+        self,
+        *,
+        skill: "SkillSpec",
+        benchmark_queries: list[str],
+    ) -> "EvalScore":
+        """Evaluate a skill against benchmark queries. Returns aggregated EvalScore."""
+        from ..types import EvalScore
+        scores: list[EvalScore] = []
+        for query in benchmark_queries[:5]:
+            tool_name = skill.allowed_tools[0] if skill.allowed_tools else "echo"
+            tool_spec = {"name": tool_name, "description": skill.description}
+            result = self.evaluate_query_quality(query=query, tool_spec=tool_spec)
+            scores.append(EvalScore(
+                toolfit=result.scores.get("toolfit", 0),
+                clarity=result.scores.get("clarity", 0),
+                naturalness=result.scores.get("naturalness", 0),
+            ))
+        if not scores:
+            return EvalScore(toolfit=0, clarity=0, naturalness=0)
+        return EvalScore(
+            toolfit=sum(s.toolfit for s in scores) / len(scores),
+            clarity=sum(s.clarity for s in scores) / len(scores),
+            naturalness=sum(s.naturalness for s in scores) / len(scores),
+        )
+
     # ── Skill Generation ─────────────────────────────────────────────
 
     def generate_skill(

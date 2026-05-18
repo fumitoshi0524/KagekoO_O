@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..types import SkillSpec, FUNCTIONAL_CATEGORIES, APPLICATION_DOMAINS
+from ..types import SkillSpec, RegenerationFeedback, FUNCTIONAL_CATEGORIES, APPLICATION_DOMAINS
 
 try:
     import yaml as _yaml
@@ -207,3 +207,92 @@ class SkillGenerator:
 
         output_path.write_text(frontmatter + skill.instructions, encoding="utf-8")
         return output_path
+
+    def regenerate_with_feedback(
+        self, skill: SkillSpec, feedback: RegenerationFeedback
+    ) -> SkillSpec:
+        """Regenerate a skill based on evaluation feedback."""
+        prompt = f"""You are a skill improver. The following skill was evaluated and needs improvement.
+
+ORIGINAL SKILL:
+Name: {skill.name}
+Description: {skill.description}
+Category: {skill.metadata.get('category', 'unknown')}
+Domain: {skill.metadata.get('domain', 'unknown')}
+Tools: {json.dumps(skill.allowed_tools)}
+Instructions:
+{skill.instructions}
+
+EVALUATION FEEDBACK:
+- Toolfit score: {feedback.eval_score.toolfit}/10
+- Clarity score: {feedback.eval_score.clarity}/10
+- Naturalness score: {feedback.eval_score.naturalness}/10
+- Expected tools: {json.dumps(feedback.expected_tools)}
+- Observed tools: {json.dumps(feedback.observed_tools)}
+- Suggestions: {feedback.suggestions}
+
+Please regenerate this skill with improved structure. Fix any issues mentioned.
+Maintain the same name. Follow the standard skill format:
+---
+name: {skill.name}
+description: ...
+category: {skill.metadata.get('category', 'operations')}
+domain: {skill.metadata.get('domain', 'technology')}
+tools:
+  - tool.name
+permissions:
+  - read
+---
+
+# Skill: {skill.name}
+..."""
+
+        raw = self.llm.complete_text(prompt)
+        regenerated = self._parse_markdown_skill(raw, skill.description)
+        if regenerated.name != skill.name:
+            regenerated = SkillSpec(
+                name=skill.name,
+                description=regenerated.description,
+                instructions=regenerated.instructions,
+                allowed_tools=regenerated.allowed_tools,
+                permissions=regenerated.permissions,
+                metadata=regenerated.metadata,
+                source_path=regenerated.source_path,
+                format="qaoa-uni-tool-call",
+            )
+        return regenerated
+
+    def generate_iteratively(
+        self,
+        query: str,
+        *,
+        evaluator: object,
+        benchmark_queries: list[str] | None = None,
+        max_iterations: int = 3,
+        quality_threshold: float = 7.0,
+    ) -> SkillSpec:
+        """Generate a skill, evaluate it, regenerate if needed — loop until quality threshold met."""
+        skill = self.generate(query)
+
+        if benchmark_queries is None:
+            benchmark_queries = [
+                f"Use {skill.name} to complete a typical task in {skill.metadata.get('domain', 'technology')}",
+                f"Execute the {skill.name} workflow step by step",
+            ]
+
+        for iteration in range(max_iterations):
+            eval_score = evaluator.evaluate_skill(skill=skill, benchmark_queries=benchmark_queries)
+            if eval_score.passes(threshold=quality_threshold):
+                break
+
+            if iteration < max_iterations - 1:
+                feedback = RegenerationFeedback(
+                    query=query,
+                    expected_tools=skill.allowed_tools,
+                    observed_tools=skill.allowed_tools,
+                    eval_score=eval_score,
+                    suggestions=f"Improve clarity and tool binding. Average score: {eval_score.average:.1f}/10",
+                )
+                skill = self.regenerate_with_feedback(skill, feedback)
+
+        return skill

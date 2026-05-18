@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Callable, Any
 
 from ..types import SkillSpec
+from .distill import DistillEngine, DistilledSkill
 
 
 @dataclass(slots=True, kw_only=True)
@@ -14,6 +15,7 @@ class SkillConverter:
     """Convert skills between formats using registered converters."""
 
     _converters: dict[str, Callable[[Path], SkillSpec]] = field(default_factory=dict)
+    _distill_engine: DistillEngine = field(default_factory=DistillEngine)
 
     def register(self, source_format: str, converter: Callable[[Path], SkillSpec]) -> None:
         self._converters[source_format] = converter
@@ -26,6 +28,11 @@ class SkillConverter:
                 f"Available: {', '.join(sorted(self._converters))}"
             )
         return converter(source)
+
+    def distill_from_file(self, source: Path) -> DistilledSkill:
+        """Distill semantic structure from a skill file without full conversion."""
+        raw = source.read_text(encoding="utf-8")
+        return self._distill_engine.distill(raw)
 
     @property
     def supported_formats(self) -> list[str]:
