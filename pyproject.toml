@@ -1,68 +1,51 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
 
 [project]
-name = "KagekoO_O"
+name = "kageko"
 version = "0.1.0"
+description = "Three-in-one AI agent: coding, general-purpose, research"
 requires-python = ">=3.13"
+license = { text = "MIT" }
 dependencies = [
-    "anthropic>=0.57.1",
-    "chromadb>=1.5.7",
-    "dotenv>=0.9.9",
-    "google-genai>=1.13.0",
-    "openai>=2.30.0",
-    "prompt-toolkit>=3.0.0",
-    "pydantic-settings>=2.0",
-    "typer>=0.9.0",
-    "rich>=13.0.0",
-    "textual>=0.80.0",
+    "openai>=1.60.0",
+    "aiosqlite>=0.20.0",
+    "aiohttp>=3.11.0",
+    "typer>=0.15.0",
+    "rich>=13.9.0",
+    "textual>=0.89.0",
+    "uvloop>=0.21.0; sys_platform != 'win32'",
+    "pydantic>=2.10.0",
+    "tomli>=2.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
 ]
 
 [project.scripts]
-kageko-qaoa = "cli_qaoa:main"
-kageko = "qaoa.cli:_entrypoint"
+kageko = "kageko.cli:app"
 
-[project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-cov>=5.0", "ruff>=0.8", "mypy>=1.14"]
+[tool.maturin]
+features = ["pyo3/extension-module"]
+manifest-path = "src/kageko_native/Cargo.toml"
+python-source = "src"
+module-name = "kageko._native"
 
 [tool.pytest.ini_options]
+asyncio_mode = "auto"
 testpaths = ["tests"]
-pythonpath = ["."]
 
 [tool.ruff]
 target-version = "py313"
 line-length = 100
 
-[tool.ruff.lint]
-select = ["E", "W", "F", "I", "B", "C4", "UP", "ARG", "SIM"]
-ignore = ["ARG002"]
-
 [tool.mypy]
-strict = true
 python_version = "3.13"
-warn_return_any = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-strict_equality = true
-
-[tool.setuptools]
-packages = [
-    "qaoa", "qaoa.adapters", "qaoa.agents", "qaoa.cli", "qaoa.config",
-    "qaoa.core", "qaoa.daemon", "qaoa.db",
-    "qaoa.experience", "qaoa.integration", "qaoa.mcp", "qaoa.message",
-    "qaoa.pipeline", "qaoa.session", "qaoa.skills", "qaoa.tools",
-    "qaoa.cli.commands",
-    "qaoa.learning", "qaoa.llm", "qaoa.llm.providers", "qaoa.llm.openai_compat",
-    "qaoa.llm.tools", "qaoa.llm.claw_support",
-    "qaoa.llm.tools.browser", "qaoa.llm.tools.browser.browser_providers",
-    "qaoa.llm.tools.desktop", "qaoa.llm.tools.environments",
-    "qaoa.plugin", "qaoa.lsp", "qaoa.history", "qaoa.utils", "qaoa.integrations",
-]
-py-modules = ["KagekoO_O", "cli_qaoa"]
-
-[tool.uv]
-package = true
-
-[dependency-groups]
-dev = ["deptry>=0.25.1"]
+strict = true

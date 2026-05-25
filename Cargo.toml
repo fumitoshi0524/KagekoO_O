@@ -1,0 +1,7 @@
+[workspace]
+resolver = "2"
+members = ["src/kageko_native"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"

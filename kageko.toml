@@ -1,0 +1,14 @@
+[agent]
+model = "gpt-4o"
+mode = "tool-use"
+max_turns = 20
+
+[security]
+mode = "interactive"
+sandbox = false
+
+[database]
+path = "~/.kageko/kageko.db"
+
+[logging]
+level = "INFO"

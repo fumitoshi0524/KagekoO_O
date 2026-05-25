@@ -1,45 +1,11 @@
-# Python
 __pycache__/
-*.py[cod]
+*.pyc
+*.so
+*.pyd
+*.dylib
+*.dll
+target/
 *.egg-info/
 dist/
 build/
-*.egg
-
-# Virtual environment
-.venv/
-
-# IDE / editor
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# Environment & secrets
-.env
-.env.local
-*.pem
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Test & coverage
-.pytest_cache/
-.ruff_cache/
-.mypy_cache/
-htmlcov/
-.coverage
-coverage.xml
-
-# Kageko runtime data (local, not committed)
-# skills/  (uncomment if you store generated skills outside the repo)
-
-# CC related files
-.claude/plans/
-CLAUDE.md
-AGENTS.md
-
-# uv generated files
-uv.lock
+.kageko/
