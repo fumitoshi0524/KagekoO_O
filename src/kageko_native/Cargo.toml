@@ -9,3 +9,10 @@ crate-type = ["cdylib"]
 
 [dependencies]
 pyo3 = { version = "0.23", features = ["extension-module"] }
+sha2 = "0.10"
+hex = "0.4"
+grep = "0.4"
+grep-matcher = "0.1"
+grep-regex = "0.1"
+grep-searcher = "0.1"
+walkdir = "2"
