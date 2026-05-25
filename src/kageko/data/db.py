@@ -1,0 +1,393 @@
+"""Async SQLite database layer with FTS5 full-text search."""
+
+from __future__ import annotations
+
+import json
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+
+import aiosqlite
+
+
+def _now() -> str:
+    """Return current UTC timestamp in ISO format."""
+    return datetime.now(timezone.utc).isoformat()
+
+
+# ---------------------------------------------------------------------------
+# Dataclasses
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SessionRecord:
+    id: str
+    platform: str
+    chat_id: str
+    created_at: str
+    metadata: dict = field(default_factory=dict)
+
+
+@dataclass
+class MessageRecord:
+    id: int | None
+    session_id: str
+    role: str
+    content: str
+    created_at: str
+
+
+@dataclass
+class SkillRecord:
+    id: int | None
+    name: str
+    version: str
+    trigger: str
+    description: str
+    content: str
+    tags: list[str] = field(default_factory=list)
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass
+class MemoryRecord:
+    id: int | None
+    key: str
+    value: str
+    source: str
+    created_at: str
+
+
+@dataclass
+class TrajectoryRecord:
+    id: int | None
+    query: str
+    steps_json: str
+    answer: str
+    created_at: str
+
+
+# ---------------------------------------------------------------------------
+# KagekoDB
+# ---------------------------------------------------------------------------
+
+
+class KagekoDB:
+    """Async SQLite wrapper with FTS5 virtual tables for skills and memory."""
+
+    def __init__(self, path: str = "kageko.db") -> None:
+        self._path = path
+        self._db: aiosqlite.Connection | None = None
+
+    # ---- lifecycle --------------------------------------------------------
+
+    async def init(self) -> None:
+        self._db = await aiosqlite.connect(self._path)
+        self._db.row_factory = aiosqlite.Row
+        await self._db.execute("PRAGMA journal_mode=WAL")
+        await self._db.execute("PRAGMA foreign_keys=ON")
+        await self._create_tables()
+
+    async def close(self) -> None:
+        if self._db:
+            await self._db.close()
+            self._db = None
+
+    @property
+    def _conn(self) -> aiosqlite.Connection:
+        assert self._db is not None, "Database not initialised – call init() first"
+        return self._db
+
+    # ---- schema -----------------------------------------------------------
+
+    async def _create_tables(self) -> None:
+        await self._conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS sessions (
+                id          TEXT PRIMARY KEY,
+                platform    TEXT NOT NULL,
+                chat_id     TEXT NOT NULL,
+                created_at  TEXT NOT NULL,
+                metadata    TEXT NOT NULL DEFAULT '{}'
+            );
+
+            CREATE TABLE IF NOT EXISTS messages (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id  TEXT NOT NULL REFERENCES sessions(id),
+                role        TEXT NOT NULL,
+                content     TEXT NOT NULL,
+                created_at  TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS skills (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                name        TEXT NOT NULL UNIQUE,
+                version     TEXT NOT NULL,
+                trigger     TEXT NOT NULL DEFAULT '',
+                description TEXT NOT NULL DEFAULT '',
+                content     TEXT NOT NULL DEFAULT '',
+                tags        TEXT NOT NULL DEFAULT '[]',
+                created_at  TEXT NOT NULL,
+                updated_at  TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS tools (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                name        TEXT NOT NULL UNIQUE,
+                description TEXT NOT NULL DEFAULT '',
+                schema_json TEXT NOT NULL DEFAULT '{}',
+                enabled     INTEGER NOT NULL DEFAULT 1,
+                created_at  TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS trajectories (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                query       TEXT NOT NULL,
+                steps_json  TEXT NOT NULL DEFAULT '[]',
+                answer      TEXT NOT NULL DEFAULT '',
+                created_at  TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS memory (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                key         TEXT NOT NULL,
+                value       TEXT NOT NULL,
+                source      TEXT NOT NULL DEFAULT '',
+                created_at  TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS curator_log (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                action      TEXT NOT NULL,
+                detail      TEXT NOT NULL DEFAULT '',
+                created_at  TEXT NOT NULL
+            );
+
+            -- FTS5 virtual tables
+            CREATE VIRTUAL TABLE IF NOT EXISTS skills_fts USING fts5(
+                name, trigger, description, content, tags,
+                content='skills',
+                content_rowid='id'
+            );
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+                key, value,
+                content='memory',
+                content_rowid='id'
+            );
+            """
+        )
+        await self._conn.commit()
+
+    # ---- helpers ----------------------------------------------------------
+
+    async def list_tables(self) -> list[str]:
+        cursor = await self._conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+        )
+        rows = await cursor.fetchall()
+        return [row["name"] for row in rows]
+
+    # ---- sessions ---------------------------------------------------------
+
+    async def create_session(
+        self,
+        platform: str,
+        chat_id: str,
+        metadata: dict | None = None,
+    ) -> SessionRecord:
+        sid = uuid.uuid4().hex
+        now = _now()
+        meta = json.dumps(metadata or {})
+        await self._conn.execute(
+            "INSERT INTO sessions (id, platform, chat_id, created_at, metadata) VALUES (?,?,?,?,?)",
+            (sid, platform, chat_id, now, meta),
+        )
+        await self._conn.commit()
+        return SessionRecord(id=sid, platform=platform, chat_id=chat_id, created_at=now, metadata=metadata or {})
+
+    async def get_session(self, session_id: str) -> SessionRecord | None:
+        cursor = await self._conn.execute(
+            "SELECT * FROM sessions WHERE id=?", (session_id,)
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return SessionRecord(
+            id=row["id"],
+            platform=row["platform"],
+            chat_id=row["chat_id"],
+            created_at=row["created_at"],
+            metadata=json.loads(row["metadata"]),
+        )
+
+    # ---- messages ---------------------------------------------------------
+
+    async def append_message(self, session_id: str, role: str, content: str) -> MessageRecord:
+        now = _now()
+        cursor = await self._conn.execute(
+            "INSERT INTO messages (session_id, role, content, created_at) VALUES (?,?,?,?)",
+            (session_id, role, content, now),
+        )
+        await self._conn.commit()
+        return MessageRecord(id=cursor.lastrowid, session_id=session_id, role=role, content=content, created_at=now)
+
+    async def get_messages(self, session_id: str) -> list[MessageRecord]:
+        cursor = await self._conn.execute(
+            "SELECT * FROM messages WHERE session_id=? ORDER BY id", (session_id,)
+        )
+        rows = await cursor.fetchall()
+        return [
+            MessageRecord(
+                id=r["id"],
+                session_id=r["session_id"],
+                role=r["role"],
+                content=r["content"],
+                created_at=r["created_at"],
+            )
+            for r in rows
+        ]
+
+    # ---- skills -----------------------------------------------------------
+
+    async def save_skill(
+        self,
+        name: str,
+        version: str,
+        trigger: str = "",
+        description: str = "",
+        content: str = "",
+        tags: list[str] | None = None,
+    ) -> SkillRecord:
+        now = _now()
+        tags = tags or []
+        tags_json = json.dumps(tags)
+        await self._conn.execute(
+            """INSERT INTO skills (name, version, trigger, description, content, tags, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?)
+               ON CONFLICT(name) DO UPDATE SET
+                 version=excluded.version,
+                 trigger=excluded.trigger,
+                 description=excluded.description,
+                 content=excluded.content,
+                 tags=excluded.tags,
+                 updated_at=excluded.updated_at""",
+            (name, version, trigger, description, content, tags_json, now, now),
+        )
+        # Keep FTS in sync
+        await self._conn.execute(
+            "INSERT INTO skills_fts(skills_fts, rowid, name, trigger, description, content, tags) VALUES ('rebuild', (SELECT id FROM skills WHERE name=?), ?,?,?,?,?)",
+            (name, name, trigger, description, content, " ".join(tags)),
+        )
+        await self._conn.commit()
+        return SkillRecord(
+            id=None, name=name, version=version, trigger=trigger,
+            description=description, content=content, tags=tags,
+            created_at=now, updated_at=now,
+        )
+
+    async def search_skills(self, query: str) -> list[SkillRecord]:
+        cursor = await self._conn.execute(
+            """SELECT s.* FROM skills s
+               JOIN skills_fts f ON s.id = f.rowid
+               WHERE skills_fts MATCH ?
+               ORDER BY rank""",
+            (query,),
+        )
+        rows = await cursor.fetchall()
+        return [
+            SkillRecord(
+                id=r["id"], name=r["name"], version=r["version"],
+                trigger=r["trigger"], description=r["description"],
+                content=r["content"], tags=json.loads(r["tags"]),
+                created_at=r["created_at"], updated_at=r["updated_at"],
+            )
+            for r in rows
+        ]
+
+    # ---- tools ------------------------------------------------------------
+
+    async def save_tool(
+        self,
+        name: str,
+        description: str = "",
+        schema_json: str = "{}",
+        enabled: bool = True,
+    ) -> None:
+        now = _now()
+        await self._conn.execute(
+            """INSERT INTO tools (name, description, schema_json, enabled, created_at)
+               VALUES (?,?,?,?,?)
+               ON CONFLICT(name) DO UPDATE SET
+                 description=excluded.description,
+                 schema_json=excluded.schema_json,
+                 enabled=excluded.enabled""",
+            (name, description, schema_json, int(enabled), now),
+        )
+        await self._conn.commit()
+
+    # ---- memory -----------------------------------------------------------
+
+    async def save_memory(self, key: str, value: str, source: str = "") -> MemoryRecord:
+        now = _now()
+        cursor = await self._conn.execute(
+            "INSERT INTO memory (key, value, source, created_at) VALUES (?,?,?,?)",
+            (key, value, source, now),
+        )
+        row_id = cursor.lastrowid
+        await self._conn.execute(
+            "INSERT INTO memory_fts(memory_fts, rowid, key, value) VALUES ('rebuild', ?, ?, ?)",
+            (row_id, key, value),
+        )
+        await self._conn.commit()
+        return MemoryRecord(id=row_id, key=key, value=value, source=source, created_at=now)
+
+    async def search_memory(self, query: str) -> list[MemoryRecord]:
+        cursor = await self._conn.execute(
+            """SELECT m.* FROM memory m
+               JOIN memory_fts f ON m.id = f.rowid
+               WHERE memory_fts MATCH ?
+               ORDER BY rank""",
+            (query,),
+        )
+        rows = await cursor.fetchall()
+        return [
+            MemoryRecord(
+                id=r["id"], key=r["key"], value=r["value"],
+                source=r["source"], created_at=r["created_at"],
+            )
+            for r in rows
+        ]
+
+    # ---- trajectories -----------------------------------------------------
+
+    async def save_trajectory(self, data: dict) -> TrajectoryRecord:
+        now = _now()
+        query = data.get("query", "")
+        steps_json = json.dumps(data.get("steps", []))
+        answer = data.get("answer", "")
+        cursor = await self._conn.execute(
+            "INSERT INTO trajectories (query, steps_json, answer, created_at) VALUES (?,?,?,?)",
+            (query, steps_json, answer, now),
+        )
+        await self._conn.commit()
+        return TrajectoryRecord(
+            id=cursor.lastrowid, query=query,
+            steps_json=steps_json, answer=answer, created_at=now,
+        )
+
+    async def list_trajectories(self) -> list[TrajectoryRecord]:
+        cursor = await self._conn.execute(
+            "SELECT * FROM trajectories ORDER BY id"
+        )
+        rows = await cursor.fetchall()
+        return [
+            TrajectoryRecord(
+                id=r["id"], query=r["query"],
+                steps_json=r["steps_json"], answer=r["answer"],
+                created_at=r["created_at"],
+            )
+            for r in rows
+        ]
