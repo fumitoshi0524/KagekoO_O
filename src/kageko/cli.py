@@ -8,7 +8,9 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
+from kageko.agent.permissions import Decision, PermissionPipeline, SecurityMode
 from kageko.config import load_config
+from kageko.types import ToolCall
 
 app = typer.Typer(
     name="kageko",
@@ -79,6 +81,7 @@ def tui(
 
         permissions = PermissionPipeline(
             mode=SecurityMode(config.security.mode),
+            prompt_fn=console_prompt_fn,
             sandbox_enabled=config.security.sandbox,
         )
 
@@ -90,8 +93,11 @@ def tui(
             system_prompt=config.agent.system_prompt or "You are Kageko, a helpful AI assistant.",
         )
 
+        import uuid
         agent_mode = AgentMode(config.agent.mode)
-        tui_app = KagekoTUI(engine=engine, mode=agent_mode)
+        session_chat_id = uuid.uuid4().hex[:12]
+        session = await db.create_session(platform="tui", chat_id=session_chat_id)
+        tui_app = KagekoTUI(engine=engine, mode=agent_mode, db=db, session=session)
         tui_app.run()
         await db.close()
 
@@ -103,6 +109,17 @@ def version() -> None:
     """Print version."""
     import kageko
     console.print(f"Kageko v{kageko.__version__}")
+
+
+async def console_prompt_fn(tool_call: ToolCall) -> Decision:
+    console.print(f"\n[yellow]Tool:[/] {tool_call.name}({tool_call.args})")
+    loop = asyncio.get_event_loop()
+    answer = await loop.run_in_executor(
+        None, lambda: console.input("[yellow]Allow? [y/n/a]:[/] ").strip().lower()
+    )
+    if answer in ("y", "yes", "a", "always"):
+        return Decision.ALLOW
+    return Decision.DENY
 
 
 async def _interactive_chat(config) -> None:
@@ -143,6 +160,7 @@ async def _interactive_chat(config) -> None:
 
     permissions = PermissionPipeline(
         mode=SecurityMode(config.security.mode),
+        prompt_fn=console_prompt_fn,
         sandbox_enabled=config.security.sandbox,
     )
 
@@ -157,12 +175,15 @@ async def _interactive_chat(config) -> None:
         system_prompt=system_prompt,
     )
 
-    mode = AgentMode(config.agent.mode)
+    from kageko.cli_commands import ModeRef, SlashCommands
+
+    mode = ModeRef(AgentMode(config.agent.mode))
 
     console.print(f"[bold green]Kageko[/] — model={config.agent.model} mode={mode.value}")
     console.print("Type your message, or 'quit' to exit.\n")
 
     messages: list[Message] = []
+    sc = SlashCommands(console, messages, mode, db=db, session=session)
 
     while True:
         try:
@@ -174,6 +195,10 @@ async def _interactive_chat(config) -> None:
         if not user_input.strip():
             continue
 
+        # Handle slash commands
+        if sc.handle(user_input.strip()):
+            continue
+
         # Append user message to history and persist to DB
         messages.append(Message(role="user", content=user_input.strip()))
         await db.append_message(session.id, role="user", content=user_input.strip())
@@ -182,7 +207,7 @@ async def _interactive_chat(config) -> None:
 
         try:
             console.print()
-            async for tok in engine.run_stream(messages, mode=mode):
+            async for tok in engine.run_stream(messages, mode=mode.mode):
                 if isinstance(tok, Correction):
                     console.print(f"\n[bold red][TTSR][/]: {tok.message}")
                     break
@@ -192,7 +217,7 @@ async def _interactive_chat(config) -> None:
             console.print()
         except Exception:
             with console.status("Thinking..."):
-                result = await engine.run(messages, mode=mode)
+                result = await engine.run(messages, mode=mode.mode)
             assistant_text = result.answer
             console.print(f"\n{result.answer}\n")
 
