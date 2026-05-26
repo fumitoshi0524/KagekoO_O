@@ -50,6 +50,19 @@ def test_config_temperature():
     assert hasattr(config.agent, "temperature")
     assert config.agent.temperature == 0.7
 
+def test_load_config_custom_temperature_and_context_window(tmp_path):
+    cfg_file = tmp_path / "kageko.toml"
+    cfg_file.write_text("""
+[agent]
+model = "gpt-4o"
+temperature = 0.3
+context_window_size = 16000
+""")
+    config = load_config(str(cfg_file))
+    assert config.agent.temperature == 0.3
+    assert config.agent.context_window_size == 16000
+
+
 def test_config_env_var_override_api_key():
     import os
     from kageko.config import load_config

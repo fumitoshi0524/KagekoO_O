@@ -67,6 +67,7 @@ def tui(
             model=config.agent.model,
             api_key=config.agent.api_key,
             base_url=config.agent.base_url,
+            temperature=config.agent.temperature,
         )
 
         registry = ToolRegistry()
@@ -91,6 +92,7 @@ def tui(
             permissions=permissions,
             max_turns=config.agent.max_turns,
             system_prompt=config.agent.system_prompt or "You are Kageko, a helpful AI assistant.",
+            context_window_size=config.agent.context_window_size,
         )
 
         import uuid
@@ -146,6 +148,7 @@ async def _interactive_chat(config) -> None:
         model=config.agent.model,
         api_key=config.agent.api_key,
         base_url=config.agent.base_url,
+        temperature=config.agent.temperature,
     )
 
     registry = ToolRegistry()
@@ -173,6 +176,7 @@ async def _interactive_chat(config) -> None:
         permissions=permissions,
         max_turns=config.agent.max_turns,
         system_prompt=system_prompt,
+        context_window_size=config.agent.context_window_size,
     )
 
     from kageko.cli_commands import ModeRef, SlashCommands
