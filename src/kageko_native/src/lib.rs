@@ -3,6 +3,7 @@ use pyo3::prelude::*;
 mod ast_tool;
 mod grep;
 mod hashline;
+mod shell;
 
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -13,5 +14,6 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<grep::GrepMatch>()?;
     m.add_function(wrap_pyfunction!(ast_tool::summarize, m)?)?;
     m.add_class::<ast_tool::ASTNode>()?;
+    m.add_class::<shell::NativeShell>()?;
     Ok(())
 }

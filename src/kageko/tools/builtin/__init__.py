@@ -1,5 +1,6 @@
 from kageko.tools.builtin.file_tools import file_read, file_write, file_list
 from kageko.tools.builtin.shell_tools import bash_run
+from kageko.tools.builtin.shell_tools import NATIVE_SHELL_TOOL, native_shell_handler
 from kageko.tools.builtin.system_tools import echo, todo_add, todo_list
 from kageko.tools.builtin.hashline_tool import hashline_edit, HASHLINE_TOOL
 
@@ -33,6 +34,12 @@ BUILTIN_TOOLS = [
      "parameters": {"type": "object", "properties": {}}},
 
     {**HASHLINE_TOOL, "fn": hashline_edit},
+
+    {"name": NATIVE_SHELL_TOOL["name"],
+     "description": NATIVE_SHELL_TOOL["description"],
+     "parameters": NATIVE_SHELL_TOOL["parameters"],
+     "fn": native_shell_handler,
+     "category": NATIVE_SHELL_TOOL["category"]},
 ]
 
 __all__ = ["BUILTIN_TOOLS"]
