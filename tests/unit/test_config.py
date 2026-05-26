@@ -92,3 +92,49 @@ def test_config_env_var_override_base_url():
         assert config.agent.base_url == "http://localhost:8080/v1"
     finally:
         del os.environ["KAGEKO_BASE_URL"]
+
+
+def test_provider_config(tmp_path):
+    toml = """
+[providers.openai]
+base_url = "https://api.openai.com/v1"
+api_key = "sk-test"
+
+[agent]
+provider = "openai"
+model = "gpt-4o"
+"""
+    (tmp_path / "k.toml").write_text(toml)
+    from kageko.config import load_config
+    config = load_config(str(tmp_path / "k.toml"))
+    assert config.agent.base_url == "https://api.openai.com/v1"
+    assert config.agent.api_key == "sk-test"
+
+def test_provider_api_key_env(tmp_path, monkeypatch):
+    toml = """
+[providers.local]
+base_url = "http://localhost:8080/v1"
+api_key_env = "LOCAL_KEY"
+
+[agent]
+provider = "local"
+"""
+    monkeypatch.setenv("LOCAL_KEY", "env-resolved-key")
+    (tmp_path / "k.toml").write_text(toml)
+    from kageko.config import load_config
+    config = load_config(str(tmp_path / "k.toml"))
+    assert config.agent.api_key == "env-resolved-key"
+
+def test_provider_backward_compat(tmp_path):
+    toml = '[agent]\nmodel = "gpt-4o"\napi_key = "flat-key"\n'
+    (tmp_path / "k.toml").write_text(toml)
+    from kageko.config import load_config
+    config = load_config(str(tmp_path / "k.toml"))
+    assert config.agent.api_key == "flat-key"
+
+def test_provider_unknown_falls_back(tmp_path):
+    toml = '[agent]\nprovider = "nonexistent"\n'
+    (tmp_path / "k.toml").write_text(toml)
+    from kageko.config import load_config
+    config = load_config(str(tmp_path / "k.toml"))
+    assert config.agent.base_url == "https://api.openai.com/v1"

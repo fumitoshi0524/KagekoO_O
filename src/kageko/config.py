@@ -12,6 +12,13 @@ except ImportError:
 
 
 @dataclass
+class ProviderConfig:
+    base_url: str = "https://api.openai.com/v1"
+    api_key: str = ""
+    api_key_env: str = ""
+
+
+@dataclass
 class AgentConfig:
     model: str = "gpt-4o"
     mode: str = "tool-use"
@@ -21,6 +28,7 @@ class AgentConfig:
     context_window_size: int = 8000
     temperature: float = 0.7
     system_prompt: str = ""
+    provider: str = ""
 
 
 @dataclass
@@ -45,6 +53,7 @@ class KagekoConfig:
     security: SecurityConfig = field(default_factory=SecurityConfig)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    providers: dict[str, ProviderConfig] = field(default_factory=dict)
 
 
 def _load_dotenv() -> None:
@@ -70,6 +79,7 @@ def load_config(path: str | None = None) -> KagekoConfig:
         with open(path, "rb") as f:
             data = tomllib.load(f)
         config = _parse_config(data)
+        _resolve_providers(config)
 
     # Env var overrides (env wins over TOML)
     api_key = os.environ.get("KAGEKO_API_KEY")
@@ -99,6 +109,7 @@ def _parse_config(data: dict) -> KagekoConfig:
             context_window_size=a.get("context_window_size", 8000),
             temperature=a.get("temperature", 0.7),
             system_prompt=a.get("system_prompt", ""),
+            provider=a.get("provider", ""),
         )
 
     if "security" in data:
@@ -116,4 +127,27 @@ def _parse_config(data: dict) -> KagekoConfig:
         lg = data["logging"]
         config.logging = LoggingConfig(level=lg.get("level", "INFO"))
 
+    if "providers" in data:
+        for name, p in data["providers"].items():
+            config.providers[name] = ProviderConfig(
+                base_url=p.get("base_url", "https://api.openai.com/v1"),
+                api_key=p.get("api_key", ""),
+                api_key_env=p.get("api_key_env", ""),
+            )
+
     return config
+
+
+def _resolve_providers(config: KagekoConfig) -> None:
+    if not config.providers or not config.agent.provider:
+        return
+    provider = config.providers.get(config.agent.provider)
+    if provider is None:
+        return
+    if not config.agent.api_key:
+        if provider.api_key_env:
+            config.agent.api_key = os.environ.get(provider.api_key_env, "")
+        elif provider.api_key:
+            config.agent.api_key = provider.api_key
+    if provider.base_url and config.agent.base_url == "https://api.openai.com/v1":
+        config.agent.base_url = provider.base_url
