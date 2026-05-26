@@ -82,3 +82,40 @@ async def test_save_trajectory(db):
     trajectories = await db.list_trajectories()
     assert len(trajectories) == 1
     assert trajectories[0].query == "read config.py"
+
+
+@pytest.mark.asyncio
+async def test_list_sessions(db):
+    await db.create_session("cli", "s1")
+    await db.create_session("cli", "s2")
+    sessions = await db.list_sessions(limit=10)
+    assert len(sessions) >= 2
+
+
+@pytest.mark.asyncio
+async def test_get_session_by_chat_id(db):
+    await db.create_session("cli", "resume-me")
+    session = await db.get_session_by_chat_id("cli", "resume-me")
+    assert session is not None
+    assert session.chat_id == "resume-me"
+
+
+@pytest.mark.asyncio
+async def test_delete_session(db):
+    s = await db.create_session("cli", "del-me")
+    await db.append_message(s.id, "user", "hi")
+    await db.delete_session(s.id)
+    found = await db.get_session_by_chat_id("cli", "del-me")
+    assert found is None
+
+
+@pytest.mark.asyncio
+async def test_append_messages_batch(db):
+    s = await db.create_session("cli", "batch")
+    msgs = [("user", "hi"), ("assistant", "hello"), ("user", "bye")]
+    await db.append_messages_batch(s.id, msgs)
+    stored = await db.get_messages(s.id)
+    assert len(stored) == 3
+    assert stored[0].content == "hi"
+    assert stored[1].content == "hello"
+    assert stored[2].content == "bye"

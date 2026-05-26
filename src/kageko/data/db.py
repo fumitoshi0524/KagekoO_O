@@ -208,6 +208,36 @@ class KagekoDB:
         await self._conn.commit()
         return SessionRecord(id=sid, platform=platform, chat_id=chat_id, created_at=now, metadata=metadata or {})
 
+    async def list_sessions(self, limit: int = 20) -> list[SessionRecord]:
+        cursor = await self._conn.execute(
+            "SELECT * FROM sessions ORDER BY created_at DESC LIMIT ?", (limit,)
+        )
+        rows = await cursor.fetchall()
+        return [
+            SessionRecord(
+                id=r["id"], platform=r["platform"], chat_id=r["chat_id"],
+                created_at=r["created_at"], metadata=json.loads(r["metadata"]),
+            )
+            for r in rows
+        ]
+
+    async def get_session_by_chat_id(self, platform: str, chat_id: str) -> SessionRecord | None:
+        cursor = await self._conn.execute(
+            "SELECT * FROM sessions WHERE platform=? AND chat_id=?", (platform, chat_id)
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return SessionRecord(
+            id=row["id"], platform=row["platform"], chat_id=row["chat_id"],
+            created_at=row["created_at"], metadata=json.loads(row["metadata"]),
+        )
+
+    async def delete_session(self, session_id: str) -> None:
+        await self._conn.execute("DELETE FROM messages WHERE session_id=?", (session_id,))
+        await self._conn.execute("DELETE FROM sessions WHERE id=?", (session_id,))
+        await self._conn.commit()
+
     async def get_session(self, session_id: str) -> SessionRecord | None:
         cursor = await self._conn.execute(
             "SELECT * FROM sessions WHERE id=?", (session_id,)
@@ -249,6 +279,20 @@ class KagekoDB:
             )
             for r in rows
         ]
+
+    async def append_messages_batch(self, session_id: str, messages: list[tuple[str, str]]) -> list[MessageRecord]:
+        now = _now()
+        records: list[MessageRecord] = []
+        for role, content in messages:
+            cursor = await self._conn.execute(
+                "INSERT INTO messages (session_id, role, content, created_at) VALUES (?,?,?,?)",
+                (session_id, role, content, now),
+            )
+            records.append(
+                MessageRecord(id=cursor.lastrowid, session_id=session_id, role=role, content=content, created_at=now)
+            )
+        await self._conn.commit()
+        return records
 
     # ---- skills -----------------------------------------------------------
 
