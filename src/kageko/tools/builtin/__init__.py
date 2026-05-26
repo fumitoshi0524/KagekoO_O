@@ -1,6 +1,7 @@
 from kageko.tools.builtin.file_tools import file_read, file_write, file_list
 from kageko.tools.builtin.shell_tools import bash_run
 from kageko.tools.builtin.system_tools import echo, todo_add, todo_list
+from kageko.tools.builtin.hashline_tool import hashline_edit, HASHLINE_TOOL
 
 BUILTIN_TOOLS = [
     {"name": "file_read", "fn": file_read, "category": "file",
@@ -30,6 +31,8 @@ BUILTIN_TOOLS = [
     {"name": "todo_list", "fn": todo_list, "category": "system",
      "description": "List all pending tasks",
      "parameters": {"type": "object", "properties": {}}},
+
+    {**HASHLINE_TOOL, "fn": hashline_edit},
 ]
 
 __all__ = ["BUILTIN_TOOLS"]
