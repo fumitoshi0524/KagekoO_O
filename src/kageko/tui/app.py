@@ -55,7 +55,8 @@ class KagekoTUI(App):
         super().__init__(**kwargs)
         self.engine = engine
         self.mode = mode
-        self._history: list[dict[str, str]] = []
+        from kageko.types import Message
+        self._messages: list[Message] = []
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -76,31 +77,35 @@ class KagekoTUI(App):
         chat_log = self.query_one("#chat-log", RichLog)
 
         chat_log.write(f"[bold blue]You:[/] {user_text}")
-        self._history.append({"role": "user", "content": user_text})
+        from kageko.types import Message
+        self._messages.append(Message(role="user", content=user_text))
         self.status_text = "Thinking..."
 
-        self.run_worker(self._process_message(user_text, chat_log))
+        self.run_worker(self._process_message(chat_log))
 
-    async def _process_message(self, text: str, chat_log: RichLog) -> None:
+    async def _process_message(self, chat_log: RichLog) -> None:
         if not self.engine:
             chat_log.write("[dim]No engine configured[/]")
             self.status_text = "Ready"
             return
 
         from kageko.agent.ttsr import Correction
+        from kageko.types import Message
+        assistant_text = ""
         try:
             chat_log.write("[bold green]Kageko:[/] ", end="")
-            async for tok in self.engine.run_stream(text, mode=self.mode):
+            async for tok in self.engine.run_stream(self._messages, mode=self.mode):
                 if isinstance(tok, Correction):
                     chat_log.write(f"\n[bold red][TTSR][/]: {tok.message}")
                     break
                 if hasattr(tok, "text") and tok.text:
                     chat_log.write(tok.text, end="")
+                    assistant_text += tok.text
             chat_log.write("")
         except Exception as e:
             chat_log.write(f"\n[red]Error: {e}[/]")
 
-        self._history.append({"role": "assistant", "content": "(streamed)"})
+        self._messages.append(Message(role="assistant", content=assistant_text or "(streamed)"))
         self.status_text = "Ready"
 
     def watch_status_text(self, new_value: str) -> None:
@@ -112,4 +117,4 @@ class KagekoTUI(App):
     def action_clear(self) -> None:
         chat_log = self.query_one("#chat-log", RichLog)
         chat_log.clear()
-        self._history.clear()
+        self._messages.clear()

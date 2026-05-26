@@ -29,27 +29,45 @@ class AgentEngine:
         tool_registry: ToolRegistry,
         permissions: PermissionPipeline,
         max_turns: int = 20,
+        system_prompt: str = "",
     ):
         self.llm = llm
         self.tool_registry = tool_registry
         self.permissions = permissions
         self.max_turns = max_turns
+        self.system_prompt = system_prompt
 
-    async def run(self, message: str, mode: AgentMode = AgentMode.TOOL_USE) -> AgentResult:
+    def _prepare_messages(self, message: str | list[Message]) -> list[Message]:
+        """Convert input to message list and prepend system prompt if configured."""
+        if isinstance(message, str):
+            messages = [Message(role="user", content=message)]
+        else:
+            messages = list(message)
+
+        # Prepend system prompt if configured and not already present
+        if self.system_prompt:
+            has_system = any(m.role == "system" for m in messages)
+            if not has_system:
+                messages.insert(0, Message(role="system", content=self.system_prompt))
+
+        return messages
+
+    async def run(self, message: str | list[Message], mode: AgentMode = AgentMode.TOOL_USE) -> AgentResult:
         if mode == AgentMode.QAOA:
             return await self._qaoa_loop(message)
         return await self._tool_use_loop(message)
 
-    async def _tool_use_loop(self, message: str) -> AgentResult:
-        ctx = AgentContext(messages=[Message(role="user", content=message)])
+    async def _tool_use_loop(self, message: str | list[Message]) -> AgentResult:
+        messages = self._prepare_messages(message)
+        ctx = AgentContext(messages=messages)
         return await self._run_loop(ctx, record_trajectory=False)
 
-    async def _qaoa_loop(self, message: str) -> AgentResult:
-        trajectory = QAOATrajectory(query=message)
-        ctx = AgentContext(
-            messages=[Message(role="user", content=message)],
-            trajectory=trajectory,
-        )
+    async def _qaoa_loop(self, message: str | list[Message]) -> AgentResult:
+        messages = self._prepare_messages(message)
+        # Use last user message as query for trajectory
+        query = next((m.content for m in reversed(messages) if m.role == "user"), "")
+        trajectory = QAOATrajectory(query=query)
+        ctx = AgentContext(messages=messages, trajectory=trajectory)
         return await self._run_loop(ctx, record_trajectory=True)
 
     async def _run_loop(self, ctx: AgentContext, record_trajectory: bool) -> AgentResult:
@@ -69,6 +87,7 @@ class AgentEngine:
                     turn_count=ctx.turn_count,
                     tokens_used=ctx.tokens_used,
                     trajectory=ctx.trajectory,
+                    messages=ctx.messages,
                 )
 
             results = await self._execute_tool_calls(response.tool_calls)
@@ -92,6 +111,7 @@ class AgentEngine:
             turn_count=ctx.turn_count,
             tokens_used=ctx.tokens_used,
             trajectory=ctx.trajectory,
+            messages=ctx.messages,
         )
 
     async def _execute_tool_calls(self, tool_calls: list[ToolCall]) -> list[ToolResult]:
@@ -126,14 +146,14 @@ class AgentEngine:
 
     async def run_stream(
         self,
-        message: str,
+        message: str | list[Message],
         mode: AgentMode = AgentMode.TOOL_USE,
         ttsr_rules: list | None = None,
     ) -> AsyncIterator:
         """Stream agent responses token-by-token, optionally through TTSR interceptor."""
         from kageko.agent.ttsr import Correction, StreamInterceptor
 
-        messages = [Message(role="user", content=message)]
+        messages = self._prepare_messages(message)
         schemas = self.tool_registry.schemas()
 
         for _turn in range(self.max_turns):

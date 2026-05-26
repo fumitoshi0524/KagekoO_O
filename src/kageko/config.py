@@ -20,6 +20,7 @@ class AgentConfig:
     base_url: str = "https://api.openai.com/v1"
     context_window_size: int = 8000
     temperature: float = 0.7
+    system_prompt: str = ""
 
 
 @dataclass
@@ -80,6 +81,7 @@ def _parse_config(data: dict) -> KagekoConfig:
             base_url=a.get("base_url", "https://api.openai.com/v1"),
             context_window_size=a.get("context_window_size", 8000),
             temperature=a.get("temperature", 0.7),
+            system_prompt=a.get("system_prompt", ""),
         )
 
     if "security" in data:

@@ -72,6 +72,7 @@ class AgentResult:
     turn_count: int = 0
     tokens_used: int = 0
     trajectory: Any = None  # QAOATrajectory | None
+    messages: list[Message] = field(default_factory=list)
 
 
 @dataclass

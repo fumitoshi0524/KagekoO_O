@@ -87,6 +87,7 @@ def tui(
             tool_registry=registry,
             permissions=permissions,
             max_turns=config.agent.max_turns,
+            system_prompt=config.agent.system_prompt or "You are Kageko, a helpful AI assistant.",
         )
 
         agent_mode = AgentMode(config.agent.mode)
@@ -112,12 +113,17 @@ async def _interactive_chat(config) -> None:
     from kageko.llm import LLMAdapter
     from kageko.tools.registry import ToolRegistry, Tool
     from kageko.tools.builtin import BUILTIN_TOOLS
-    from kageko.types import AgentMode
+    from kageko.types import AgentMode, Message
 
     logging.basicConfig(level=getattr(logging, config.logging.level.upper(), logging.INFO))
 
     db = KagekoDB(config.database.path)
     await db.init()
+
+    # Create DB session for this chat
+    import uuid
+    session_chat_id = uuid.uuid4().hex[:12]
+    session = await db.create_session(platform="cli", chat_id=session_chat_id)
 
     llm = LLMAdapter(
         model=config.agent.model,
@@ -140,17 +146,23 @@ async def _interactive_chat(config) -> None:
         sandbox_enabled=config.security.sandbox,
     )
 
+    # Build default system prompt if none configured
+    system_prompt = config.agent.system_prompt or "You are Kageko, a helpful AI assistant."
+
     engine = AgentEngine(
         llm=llm,
         tool_registry=registry,
         permissions=permissions,
         max_turns=config.agent.max_turns,
+        system_prompt=system_prompt,
     )
 
     mode = AgentMode(config.agent.mode)
 
     console.print(f"[bold green]Kageko[/] — model={config.agent.model} mode={mode.value}")
     console.print("Type your message, or 'quit' to exit.\n")
+
+    messages: list[Message] = []
 
     while True:
         try:
@@ -162,19 +174,32 @@ async def _interactive_chat(config) -> None:
         if not user_input.strip():
             continue
 
+        # Append user message to history and persist to DB
+        messages.append(Message(role="user", content=user_input.strip()))
+        await db.append_message(session.id, role="user", content=user_input.strip())
+
+        assistant_text = ""
+
         try:
             console.print()
-            async for tok in engine.run_stream(user_input.strip(), mode=mode):
+            async for tok in engine.run_stream(messages, mode=mode):
                 if isinstance(tok, Correction):
                     console.print(f"\n[bold red][TTSR][/]: {tok.message}")
                     break
                 if hasattr(tok, "text") and tok.text:
                     console.print(tok.text, end="")
+                    assistant_text += tok.text
             console.print()
         except Exception:
             with console.status("Thinking..."):
-                result = await engine.run(user_input.strip(), mode=mode)
+                result = await engine.run(messages, mode=mode)
+            assistant_text = result.answer
             console.print(f"\n{result.answer}\n")
+
+        # Append assistant reply to history and persist to DB
+        messages.append(Message(role="assistant", content=assistant_text))
+        await db.append_message(session.id, role="assistant", content=assistant_text)
+
     await db.close()
 
 
