@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
@@ -140,14 +141,34 @@ class AgentEngine:
 
             if ttsr_rules:
                 interceptor = StreamInterceptor(rules=ttsr_rules)
-                text_stream = self._extract_text(token_stream)
+                tool_tokens: list = []
                 full_content = ""
-                async for item in interceptor.intercept(text_stream):
+                correction_fired = False
+
+                text_gen = self._text_generator(token_stream, tool_tokens)
+                async for item in interceptor.intercept(text_gen):
                     if isinstance(item, Correction):
                         yield item
-                        return
+                        correction_fired = True
+                        break
                     full_content += item
                     yield StreamToken(text=item)
+
+                if correction_fired:
+                    return
+
+                if tool_tokens:
+                    tool_calls = self._reconstruct_tool_calls(tool_tokens)
+                    messages.append(Message(
+                        role="assistant",
+                        content=full_content,
+                        tool_calls=tool_calls,
+                    ))
+                    results = await self._execute_tool_calls(tool_calls)
+                    for result in results:
+                        messages.append(result.to_message())
+                    continue
+
                 messages.append(Message(role="assistant", content=full_content))
                 return
 
@@ -177,10 +198,12 @@ class AgentEngine:
 
         yield StreamToken(text="(max turns reached)")
 
-    async def _extract_text(self, token_stream) -> AsyncIterator[str]:
-        """Extract text from StreamToken stream for TTSR consumption."""
+    async def _text_generator(self, token_stream, tool_tokens: list) -> AsyncIterator[str]:
+        """Extract text tokens for TTSR consumption while collecting tool call tokens."""
         async for tok in token_stream:
-            if tok.text:
+            if tok.is_tool_call:
+                tool_tokens.append(tok)
+            elif tok.text:
                 yield tok.text
 
     def _reconstruct_tool_calls(self, tokens: list) -> list[ToolCall]:
@@ -198,7 +221,11 @@ class AgentEngine:
         for tc_id, data in by_id.items():
             try:
                 args = json.loads(data["args_str"]) if data["args_str"] else {}
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
+                logging.getLogger("kageko.agent.loop").warning(
+                    "Failed to parse tool call args for %s: %s (raw: %r)",
+                    data["name"], e, data["args_str"]
+                )
                 args = {}
             result.append(ToolCall(id=tc_id, name=data["name"], args=args))
         return result
