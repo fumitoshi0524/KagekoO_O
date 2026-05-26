@@ -9,7 +9,7 @@ def test_hashline_tool_schema():
     assert "source" in HASHLINE_TOOL["parameters"]["properties"]
     assert "edit" in HASHLINE_TOOL["parameters"]["properties"]
     assert "source" in HASHLINE_TOOL["parameters"]["required"]
-    assert "edit" in HASHLINE_TOOL["parameters"]["required"]
+    assert "edit" not in HASHLINE_TOOL["parameters"]["required"]
 
 
 @pytest.mark.asyncio
@@ -18,7 +18,6 @@ async def test_hashline_tool_edit_single_line():
     from kageko.tools.builtin.hashline_tool import hashline_edit
 
     source = "hello\nworld\nfoo"
-    lines = source.split("\n")
     # Get anchor for 'world' line (line 2)
     import hashlib
     anchor = hashlib.sha256("world".encode()).hexdigest()[:8]
@@ -60,7 +59,7 @@ async def test_hashline_tool_anchor_not_found():
 
 
 @pytest.mark.asyncio
-async def test_hashline_tool_read_file_then_edit():
+async def test_hashline_tool_python_source_edit():
     """Hashline tool accepts source directly (no file I/O)."""
     from kageko.tools.builtin.hashline_tool import hashline_edit
 

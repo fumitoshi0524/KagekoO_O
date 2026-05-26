@@ -32,7 +32,7 @@ HASHLINE_TOOL: dict[str, Any] = {
                 "description": "Multiple hashline edits, one per line",
             },
         },
-        "required": ["source", "edit"],
+        "required": ["source"],
     },
     "category": "code",
 }
