@@ -47,7 +47,24 @@ class KagekoConfig:
     logging: LoggingConfig = field(default_factory=LoggingConfig)
 
 
+def _load_dotenv() -> None:
+    """Load .env files in priority order: user-level, then project-level."""
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return  # python-dotenv not installed, skip silently
+
+    user_env = Path.home() / ".kageko" / ".env"
+    if user_env.exists():
+        load_dotenv(str(user_env), override=True)
+
+    project_env = Path.cwd() / ".env"
+    if project_env.exists():
+        load_dotenv(str(project_env), override=False)
+
+
 def load_config(path: str | None = None) -> KagekoConfig:
+    _load_dotenv()
     config = KagekoConfig()
     if path and Path(path).exists():
         with open(path, "rb") as f:

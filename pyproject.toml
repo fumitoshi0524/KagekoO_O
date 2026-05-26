@@ -18,6 +18,7 @@ dependencies = [
     "uvloop>=0.21.0; sys_platform != 'win32'",
     "pydantic>=2.10.0",
     "tomli>=2.2.0",
+    "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]
