@@ -42,6 +42,7 @@ def version() -> None:
 async def _interactive_chat(config) -> None:
     from kageko.agent.loop import AgentEngine
     from kageko.agent.permissions import PermissionPipeline, SecurityMode
+    from kageko.agent.ttsr import Correction
     from kageko.data.db import KagekoDB
     from kageko.llm import LLMAdapter
     from kageko.tools.registry import ToolRegistry, Tool
@@ -97,7 +98,6 @@ async def _interactive_chat(config) -> None:
         try:
             console.print()
             async for tok in engine.run_stream(user_input.strip(), mode=mode):
-                from kageko.agent.ttsr import Correction
                 if isinstance(tok, Correction):
                     console.print(f"\n[bold red][TTSR][/]: {tok.message}")
                     break

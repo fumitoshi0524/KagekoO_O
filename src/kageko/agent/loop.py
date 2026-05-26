@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
@@ -179,13 +180,11 @@ class AgentEngine:
     async def _extract_text(self, token_stream) -> AsyncIterator[str]:
         """Extract text from StreamToken stream for TTSR consumption."""
         async for tok in token_stream:
-            yield tok.text
+            if tok.text:
+                yield tok.text
 
     def _reconstruct_tool_calls(self, tokens: list) -> list[ToolCall]:
         """Reconstruct tool calls from streamed tool call tokens."""
-        import json
-        from collections import defaultdict
-
         by_id: dict[str, dict] = {}
         for tok in tokens:
             if tok.tool_call_id not in by_id:
