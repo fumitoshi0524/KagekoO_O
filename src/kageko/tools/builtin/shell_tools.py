@@ -40,11 +40,6 @@ NATIVE_SHELL_TOOL = {
                 "type": "string",
                 "description": "Shell command to execute",
             },
-            "timeout": {
-                "type": "integer",
-                "description": "Timeout in seconds (default: 30)",
-                "default": 30,
-            },
         },
         "required": ["command"],
     },
@@ -53,6 +48,7 @@ NATIVE_SHELL_TOOL = {
 
 # Global shell instance for persistence
 _shell_instance = None
+_shell_lock = asyncio.Lock()
 
 
 async def native_shell_handler(args: dict) -> str:
@@ -62,8 +58,9 @@ async def native_shell_handler(args: dict) -> str:
     except ImportError:
         return "[ERROR] Native shell module not compiled. Run: pip install -e ."
 
-    if _shell_instance is None:
-        _shell_instance = NativeShell()
+    async with _shell_lock:
+        if _shell_instance is None:
+            _shell_instance = NativeShell()
 
     command = args["command"]
     try:

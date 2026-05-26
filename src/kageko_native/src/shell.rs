@@ -54,7 +54,7 @@ impl NativeShell {
         }
     }
 
-    fn exec(&mut self, command: &str, _timeout: Option<u64>) -> PyResult<String> {
+    fn exec(&mut self, command: &str) -> PyResult<String> {
         let shell = self.shell.clone();
         let flag = self.flag.clone();
 
