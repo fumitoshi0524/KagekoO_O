@@ -1,6 +1,7 @@
 # src/kageko/config.py
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -17,6 +18,8 @@ class AgentConfig:
     max_turns: int = 20
     api_key: str = ""
     base_url: str = "https://api.openai.com/v1"
+    context_window_size: int = 8000
+    temperature: float = 0.7
 
 
 @dataclass
@@ -44,11 +47,24 @@ class KagekoConfig:
 
 
 def load_config(path: str | None = None) -> KagekoConfig:
+    config = KagekoConfig()
     if path and Path(path).exists():
         with open(path, "rb") as f:
             data = tomllib.load(f)
-        return _parse_config(data)
-    return KagekoConfig()
+        config = _parse_config(data)
+
+    # Env var overrides (env wins over TOML)
+    api_key = os.environ.get("KAGEKO_API_KEY")
+    if api_key:
+        config.agent.api_key = api_key
+    model = os.environ.get("KAGEKO_MODEL")
+    if model:
+        config.agent.model = model
+    base_url = os.environ.get("KAGEKO_BASE_URL")
+    if base_url:
+        config.agent.base_url = base_url
+
+    return config
 
 
 def _parse_config(data: dict) -> KagekoConfig:
@@ -62,6 +78,8 @@ def _parse_config(data: dict) -> KagekoConfig:
             max_turns=a.get("max_turns", 20),
             api_key=a.get("api_key", ""),
             base_url=a.get("base_url", "https://api.openai.com/v1"),
+            context_window_size=a.get("context_window_size", 8000),
+            temperature=a.get("temperature", 0.7),
         )
 
     if "security" in data:

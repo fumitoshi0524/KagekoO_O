@@ -36,3 +36,46 @@ path = "/tmp/test.db"
 def test_load_config_file_not_found():
     config = load_config("/nonexistent/kageko.toml")
     assert config.agent.model == "gpt-4o"
+
+
+def test_config_context_window_size():
+    from kageko.config import load_config
+    config = load_config()
+    assert hasattr(config.agent, "context_window_size")
+    assert config.agent.context_window_size == 8000
+
+def test_config_temperature():
+    from kageko.config import load_config
+    config = load_config()
+    assert hasattr(config.agent, "temperature")
+    assert config.agent.temperature == 0.7
+
+def test_config_env_var_override_api_key():
+    import os
+    from kageko.config import load_config
+    os.environ["KAGEKO_API_KEY"] = "test-key-123"
+    try:
+        config = load_config()
+        assert config.agent.api_key == "test-key-123"
+    finally:
+        del os.environ["KAGEKO_API_KEY"]
+
+def test_config_env_var_override_model():
+    import os
+    from kageko.config import load_config
+    os.environ["KAGEKO_MODEL"] = "gpt-3.5-turbo"
+    try:
+        config = load_config()
+        assert config.agent.model == "gpt-3.5-turbo"
+    finally:
+        del os.environ["KAGEKO_MODEL"]
+
+def test_config_env_var_override_base_url():
+    import os
+    from kageko.config import load_config
+    os.environ["KAGEKO_BASE_URL"] = "http://localhost:8080/v1"
+    try:
+        config = load_config()
+        assert config.agent.base_url == "http://localhost:8080/v1"
+    finally:
+        del os.environ["KAGEKO_BASE_URL"]

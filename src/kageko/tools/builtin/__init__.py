@@ -3,6 +3,8 @@ from kageko.tools.builtin.shell_tools import bash_run
 from kageko.tools.builtin.shell_tools import NATIVE_SHELL_TOOL, native_shell_handler
 from kageko.tools.builtin.system_tools import echo, todo_add, todo_list
 from kageko.tools.builtin.hashline_tool import hashline_edit, HASHLINE_TOOL
+from kageko.tools.grep_tool import GREP_TOOL, grep_handler
+from kageko.tools.ast_tool import AST_SUMMARIZE_TOOL, ast_summarize_handler
 
 BUILTIN_TOOLS = [
     {"name": "file_read", "fn": file_read, "category": "file",
@@ -40,6 +42,18 @@ BUILTIN_TOOLS = [
      "parameters": NATIVE_SHELL_TOOL["parameters"],
      "fn": native_shell_handler,
      "category": NATIVE_SHELL_TOOL["category"]},
+
+    {"name": GREP_TOOL["name"],
+     "description": GREP_TOOL["description"],
+     "parameters": GREP_TOOL["parameters"],
+     "fn": grep_handler,
+     "category": GREP_TOOL["category"]},
+
+    {"name": AST_SUMMARIZE_TOOL["name"],
+     "description": AST_SUMMARIZE_TOOL["description"],
+     "parameters": AST_SUMMARIZE_TOOL["parameters"],
+     "fn": ast_summarize_handler,
+     "category": AST_SUMMARIZE_TOOL["category"]},
 ]
 
 __all__ = ["BUILTIN_TOOLS"]

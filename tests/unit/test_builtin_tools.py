@@ -57,3 +57,10 @@ async def test_todo():
 
     items = await todo_list({})
     assert "Fix the bug" in items
+
+
+def test_builtin_tools_include_grep_and_ast():
+    from kageko.tools.builtin import BUILTIN_TOOLS
+    names = [t["name"] for t in BUILTIN_TOOLS]
+    assert "grep" in names
+    assert "ast_summarize" in names

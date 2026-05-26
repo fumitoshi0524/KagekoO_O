@@ -22,3 +22,11 @@ def test_grep_max_results(tmp_path):
     result = grep("match", str(tmp_path), max_results=3)
     lines = result.strip().split("\n")
     assert len(lines) == 3
+
+
+@pytest.mark.asyncio
+async def test_grep_handler_async():
+    from kageko.tools.grep_tool import grep_handler
+    result = await grep_handler({"pattern": "def ", "path": "src/kageko", "max_results": 5})
+    assert isinstance(result, str)
+    assert len(result) > 0
