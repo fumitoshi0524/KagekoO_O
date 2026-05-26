@@ -54,7 +54,7 @@ impl NativeShell {
         }
     }
 
-    fn exec(&mut self, command: &str) -> PyResult<String> {
+    fn exec(&mut self, command: &str, py: Python<'_>) -> PyResult<String> {
         let shell = self.shell.clone();
         let flag = self.flag.clone();
 
@@ -67,8 +67,8 @@ impl NativeShell {
             cmd.env(key, value);
         }
 
-        let output = cmd
-            .output()
+        let output = py
+            .allow_threads(|| cmd.output())
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to execute: {}", e)))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
