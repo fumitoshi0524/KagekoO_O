@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
 from openai import AsyncOpenAI
 
-from kageko.types import Message, ToolCall
+from kageko.types import Message, StreamToken, ToolCall
 
 
 @dataclass
@@ -77,3 +78,43 @@ class LLMAdapter:
         tokens_used = response.usage.total_tokens if response.usage else 0
 
         return LLMResponse(content=content, tool_calls=tool_calls, tokens_used=tokens_used)
+
+    async def chat_stream(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> AsyncIterator[StreamToken]:
+        """Stream tokens from the LLM one at a time."""
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": self._convert_messages(messages),
+            "temperature": self.temperature,
+            "stream": True,
+        }
+        if tools:
+            kwargs["tools"] = self._convert_tools(tools)
+
+        stream = await self._client.chat.completions.create(**kwargs)
+
+        async for chunk in stream:
+            if not chunk.choices:
+                continue
+            choice = chunk.choices[0]
+            delta = choice.delta
+
+            if delta.tool_calls:
+                for tc in delta.tool_calls:
+                    yield StreamToken(
+                        text="",
+                        is_tool_call=True,
+                        tool_name=tc.function.name or "",
+                        tool_args=tc.function.arguments or "",
+                        tool_call_id=tc.id or "",
+                    )
+            elif delta.content:
+                yield StreamToken(
+                    text=delta.content,
+                    finish_reason=choice.finish_reason or "",
+                )
+            elif choice.finish_reason:
+                yield StreamToken(text="", finish_reason=choice.finish_reason)

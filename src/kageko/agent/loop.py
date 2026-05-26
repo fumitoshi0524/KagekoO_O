@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
 from kageko.agent.permissions import Decision, PermissionPipeline
 from kageko.llm import LLMAdapter
 from kageko.tools.registry import ToolRegistry
-from kageko.types import AgentMode, AgentResult, Message, QAOATrajectory, ToolCall, ToolResult
+from kageko.types import AgentMode, AgentResult, Message, QAOATrajectory, StreamToken, ToolCall, ToolResult
 
 
 @dataclass
@@ -120,3 +121,85 @@ class AgentEngine:
 
         results = await asyncio.gather(*[_execute_one(tc) for tc in tool_calls])
         return list(results)
+
+    async def run_stream(
+        self,
+        message: str,
+        mode: AgentMode = AgentMode.TOOL_USE,
+        ttsr_rules: list | None = None,
+    ) -> AsyncIterator:
+        """Stream agent responses token-by-token, optionally through TTSR interceptor."""
+        from kageko.agent.ttsr import Correction, StreamInterceptor
+
+        messages = [Message(role="user", content=message)]
+        schemas = self.tool_registry.schemas()
+
+        for _turn in range(self.max_turns):
+            token_stream = self.llm.chat_stream(messages, tools=schemas)
+
+            if ttsr_rules:
+                interceptor = StreamInterceptor(rules=ttsr_rules)
+                text_stream = self._extract_text(token_stream)
+                full_content = ""
+                async for item in interceptor.intercept(text_stream):
+                    if isinstance(item, Correction):
+                        yield item
+                        return
+                    full_content += item
+                    yield StreamToken(text=item)
+                messages.append(Message(role="assistant", content=full_content))
+                return
+
+            full_content = ""
+            tool_tokens: list = []
+            finish_reason = ""
+
+            async for tok in token_stream:
+                if tok.is_tool_call:
+                    tool_tokens.append(tok)
+                elif tok.text:
+                    full_content += tok.text
+                    yield tok
+                if tok.finish_reason:
+                    finish_reason = tok.finish_reason
+
+            if finish_reason == "stop" or not tool_tokens:
+                messages.append(Message(role="assistant", content=full_content))
+                return
+
+            tool_calls = self._reconstruct_tool_calls(tool_tokens)
+            messages.append(Message(role="assistant", content=full_content, tool_calls=tool_calls))
+            results = await self._execute_tool_calls(tool_calls)
+            for result in results:
+                messages.append(result.to_message())
+            continue
+
+        yield StreamToken(text="(max turns reached)")
+
+    async def _extract_text(self, token_stream) -> AsyncIterator[str]:
+        """Extract text from StreamToken stream for TTSR consumption."""
+        async for tok in token_stream:
+            yield tok.text
+
+    def _reconstruct_tool_calls(self, tokens: list) -> list[ToolCall]:
+        """Reconstruct tool calls from streamed tool call tokens."""
+        import json
+        from collections import defaultdict
+
+        by_id: dict[str, dict] = {}
+        for tok in tokens:
+            if tok.tool_call_id not in by_id:
+                by_id[tok.tool_call_id] = {"name": "", "args_str": ""}
+            if tok.tool_name:
+                by_id[tok.tool_call_id]["name"] = tok.tool_name
+            if tok.tool_args:
+                by_id[tok.tool_call_id]["args_str"] += tok.tool_args
+
+        result = []
+        for tc_id, data in by_id.items():
+            try:
+                args = json.loads(data["args_str"]) if data["args_str"] else {}
+            except json.JSONDecodeError:
+                args = {}
+            result.append(ToolCall(id=tc_id, name=data["name"], args=args))
+        return result

@@ -56,6 +56,17 @@ class ToolResult:
 
 
 @dataclass
+class StreamToken:
+    """A single token or event from a streaming LLM response."""
+    text: str
+    is_tool_call: bool = False
+    tool_name: str = ""
+    tool_args: dict[str, Any] = field(default_factory=dict)
+    tool_call_id: str = ""
+    finish_reason: str = ""  # "stop", "tool_calls", ""
+
+
+@dataclass
 class AgentResult:
     answer: str
     turn_count: int = 0

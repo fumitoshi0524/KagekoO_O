@@ -94,12 +94,20 @@ async def _interactive_chat(config) -> None:
         if not user_input.strip():
             continue
 
-        with console.status("Thinking..."):
-            result = await engine.run(user_input.strip(), mode=mode)
-
-        console.print(f"\n{result.answer}\n")
-        console.print(f"[dim]turns={result.turn_count} tokens={result.tokens_used}[/]\n")
-
+        try:
+            console.print()
+            async for tok in engine.run_stream(user_input.strip(), mode=mode):
+                from kageko.agent.ttsr import Correction
+                if isinstance(tok, Correction):
+                    console.print(f"\n[bold red][TTSR][/]: {tok.message}")
+                    break
+                if hasattr(tok, "text") and tok.text:
+                    console.print(tok.text, end="")
+            console.print()
+        except Exception:
+            with console.status("Thinking..."):
+                result = await engine.run(user_input.strip(), mode=mode)
+            console.print(f"\n{result.answer}\n")
     await db.close()
 
 
