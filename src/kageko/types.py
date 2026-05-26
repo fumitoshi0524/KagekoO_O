@@ -61,7 +61,7 @@ class StreamToken:
     text: str
     is_tool_call: bool = False
     tool_name: str = ""
-    tool_args: dict[str, Any] = field(default_factory=dict)
+    tool_args: str = ""
     tool_call_id: str = ""
     finish_reason: str = ""  # "stop", "tool_calls", ""
 

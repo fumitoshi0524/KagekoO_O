@@ -14,7 +14,7 @@ def test_stream_token_text():
 
 
 def test_stream_token_tool_call():
-    tok = StreamToken(text="", is_tool_call=True, tool_name="bash", tool_args={"cmd": "ls"})
+    tok = StreamToken(text="", is_tool_call=True, tool_name="bash", tool_args='{"cmd": "ls"}')
     assert tok.is_tool_call
     assert tok.tool_name == "bash"
 
