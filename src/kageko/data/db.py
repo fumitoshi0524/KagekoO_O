@@ -86,6 +86,7 @@ class KagekoDB:
         from pathlib import Path
         self._path = str(Path(path).expanduser())
         self._db: aiosqlite.Connection | None = None
+        self._write_count = 0
 
     # ---- lifecycle --------------------------------------------------------
 
@@ -111,6 +112,7 @@ class KagekoDB:
         self, sql: str, params: tuple = (), max_retries: int = 15
     ) -> None:
         """Execute a write with jitter retry on contention."""
+        last_exc: Exception | None = None
         for attempt in range(max_retries):
             try:
                 await self._conn.execute("BEGIN IMMEDIATE")
@@ -121,9 +123,16 @@ class KagekoDB:
                     await self._conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
                     self._write_count = 0
                 return
-            except Exception:
+            except aiosqlite.OperationalError as exc:
+                last_exc = exc
+                if "locked" not in str(exc).lower():
+                    raise
+                try:
+                    await self._conn.execute("ROLLBACK")
+                except Exception:
+                    pass
                 await asyncio.sleep(random.uniform(0.02, 0.15))
-        raise RuntimeError("Max write retries exceeded")
+        raise RuntimeError("Max write retries exceeded") from last_exc
 
     @property
     def _conn(self) -> aiosqlite.Connection:
