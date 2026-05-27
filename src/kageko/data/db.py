@@ -114,6 +114,9 @@ SCHEMA_SQL = """
         description TEXT NOT NULL DEFAULT '',
         content     TEXT NOT NULL DEFAULT '',
         tags        TEXT NOT NULL DEFAULT '[]',
+        state       TEXT NOT NULL DEFAULT 'active',
+        last_used   REAL NOT NULL DEFAULT 0,
+        pinned      INTEGER NOT NULL DEFAULT 0,
         created_at  TEXT NOT NULL,
         updated_at  TEXT NOT NULL
     );
@@ -123,6 +126,8 @@ SCHEMA_SQL = """
         name        TEXT NOT NULL UNIQUE,
         description TEXT NOT NULL DEFAULT '',
         schema_json TEXT NOT NULL DEFAULT '{}',
+        source      TEXT NOT NULL DEFAULT 'manual',
+        implementation TEXT NOT NULL DEFAULT '',
         enabled     INTEGER NOT NULL DEFAULT 1,
         created_at  TEXT NOT NULL
     );
