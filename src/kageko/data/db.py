@@ -32,6 +32,7 @@ class SessionRecord:
     created_at: str
     metadata: dict = field(default_factory=dict)
     title: str = ""
+    summary: str = ""
 
 
 @dataclass
@@ -129,13 +130,14 @@ END;
 -- Session FTS (trigram for CJK support in session titles)
 CREATE VIRTUAL TABLE IF NOT EXISTS sessions_fts USING fts5(
     title,
+    summary,
     platform,
     tokenize='trigram'
 );
 
 CREATE TRIGGER IF NOT EXISTS sessions_ai AFTER INSERT ON sessions BEGIN
-    INSERT INTO sessions_fts(rowid, title, platform)
-    VALUES (new.rowid, new.title, new.platform);
+    INSERT INTO sessions_fts(rowid, title, summary, platform)
+    VALUES (new.rowid, new.title, new.summary, new.platform);
 END;
 
 CREATE TRIGGER IF NOT EXISTS sessions_ad AFTER DELETE ON sessions BEGIN
@@ -144,8 +146,8 @@ END;
 
 CREATE TRIGGER IF NOT EXISTS sessions_au AFTER UPDATE ON sessions BEGIN
     DELETE FROM sessions_fts WHERE rowid = old.rowid;
-    INSERT INTO sessions_fts(rowid, title, platform)
-    VALUES (new.rowid, new.title, new.platform);
+    INSERT INTO sessions_fts(rowid, title, summary, platform)
+    VALUES (new.rowid, new.title, new.summary, new.platform);
 END;
 """
 
@@ -178,6 +180,8 @@ class KagekoDB:
         self._write_count = 0
         await self._create_tables()
         await self._migrate_session_title()
+        await self._migrate_session_summary()
+        await self._rebuild_sessions_fts()
         await self._create_fts_indexes()
 
     async def close(self) -> None:
@@ -226,7 +230,8 @@ class KagekoDB:
                 platform    TEXT NOT NULL,
                 chat_id     TEXT NOT NULL,
                 created_at  TEXT NOT NULL,
-                metadata    TEXT NOT NULL DEFAULT '{}'
+                metadata    TEXT NOT NULL DEFAULT '{}',
+                summary     TEXT NOT NULL DEFAULT ''
             );
 
             CREATE TABLE IF NOT EXISTS messages (
@@ -301,6 +306,24 @@ class KagekoDB:
             await self._conn.execute("ALTER TABLE sessions ADD COLUMN title TEXT NOT NULL DEFAULT ''")
             await self._conn.commit()
 
+    async def _migrate_session_summary(self) -> None:
+        """Add summary column to sessions if it doesn't exist."""
+        cursor = await self._conn.execute("PRAGMA table_info(sessions)")
+        columns = [row[1] for row in await cursor.fetchall()]
+        if "summary" not in columns:
+            await self._conn.execute("ALTER TABLE sessions ADD COLUMN summary TEXT NOT NULL DEFAULT ''")
+            await self._conn.commit()
+
+    async def _rebuild_sessions_fts(self) -> None:
+        """Drop and recreate sessions_fts to pick up schema changes (e.g. summary column)."""
+        await self._conn.executescript("""
+            DROP TRIGGER IF EXISTS sessions_ai;
+            DROP TRIGGER IF EXISTS sessions_ad;
+            DROP TRIGGER IF EXISTS sessions_au;
+            DROP TABLE IF EXISTS sessions_fts;
+        """)
+        await self._conn.commit()
+
     async def _create_fts_indexes(self) -> None:
         """Create FTS5 virtual tables and triggers."""
         await self._conn.executescript(FTS_SQL)
@@ -322,16 +345,17 @@ class KagekoDB:
         chat_id: str,
         metadata: dict | None = None,
         title: str = "",
+        summary: str = "",
     ) -> SessionRecord:
         sid = uuid.uuid4().hex
         now = _now()
         meta = json.dumps(metadata or {})
         await self._conn.execute(
-            "INSERT INTO sessions (id, platform, chat_id, created_at, metadata, title) VALUES (?,?,?,?,?,?)",
-            (sid, platform, chat_id, now, meta, title),
+            "INSERT INTO sessions (id, platform, chat_id, created_at, metadata, title, summary) VALUES (?,?,?,?,?,?,?)",
+            (sid, platform, chat_id, now, meta, title, summary),
         )
         await self._conn.commit()
-        return SessionRecord(id=sid, platform=platform, chat_id=chat_id, created_at=now, metadata=metadata or {}, title=title)
+        return SessionRecord(id=sid, platform=platform, chat_id=chat_id, created_at=now, metadata=metadata or {}, title=title, summary=summary)
 
     async def list_sessions(self, limit: int = 20) -> list[SessionRecord]:
         cursor = await self._conn.execute(
@@ -343,6 +367,7 @@ class KagekoDB:
                 id=r["id"], platform=r["platform"], chat_id=r["chat_id"],
                 created_at=r["created_at"], metadata=json.loads(r["metadata"]),
                 title=r["title"] if "title" in r.keys() else "",
+                summary=r["summary"] if "summary" in r.keys() else "",
             )
             for r in rows
         ]
@@ -358,6 +383,7 @@ class KagekoDB:
             id=row["id"], platform=row["platform"], chat_id=row["chat_id"],
             created_at=row["created_at"], metadata=json.loads(row["metadata"]),
             title=row["title"] if "title" in row.keys() else "",
+            summary=row["summary"] if "summary" in row.keys() else "",
         )
 
     async def delete_session(self, session_id: str) -> None:
@@ -381,6 +407,12 @@ class KagekoDB:
         )
         await self._conn.commit()
 
+    async def set_session_summary(self, session_id: str, summary: str) -> None:
+        await self._conn.execute(
+            "UPDATE sessions SET summary=? WHERE id=?", (summary, session_id)
+        )
+        await self._conn.commit()
+
     async def get_session(self, session_id: str) -> SessionRecord | None:
         cursor = await self._conn.execute(
             "SELECT * FROM sessions WHERE id=?", (session_id,)
@@ -395,6 +427,7 @@ class KagekoDB:
             created_at=row["created_at"],
             metadata=json.loads(row["metadata"]),
             title=row["title"] if "title" in row.keys() else "",
+            summary=row["summary"] if "summary" in row.keys() else "",
         )
 
     # ---- messages ---------------------------------------------------------
