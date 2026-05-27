@@ -1,81 +1,72 @@
 import pytest
-from pathlib import Path
-from kageko.learning.skills import SkillEngine, Skill
-from kageko.data.db import KagekoDB
+from unittest.mock import AsyncMock, MagicMock
+from kageko.learning.skills import SkillEngine, Skill, validate_frontmatter
 
 
 @pytest.fixture
-async def db(tmp_path):
-    database = KagekoDB(str(tmp_path / "test.db"))
-    await database.init()
-    yield database
-    await database.close()
+def mock_db():
+    db = AsyncMock()
+    db.search_memory = AsyncMock(return_value=[])
+    return db
 
 
 @pytest.fixture
-async def engine(db):
-    return SkillEngine(db=db)
+def mock_llm():
+    llm = AsyncMock()
+    llm.chat = AsyncMock(return_value=MagicMock(
+        content='{"name": "deploy-check", "version": "1.0.0", "description": "Pre-deploy", "trigger": "deploying", "tags": ["ops"], "steps": ["Run tests"]}'
+    ))
+    return llm
 
 
-def test_skill_parse_from_markdown(tmp_path):
-    md_file = tmp_path / "test-skill.md"
-    md_file.write_text("""---
-name: deploy-check
-version: 1.0.0
-trigger: When deploying
-description: Pre-deployment validation
-tags: [devops]
----
-
-# Deploy Check
-
-## Steps
-1. Run tests
-2. Check git status
-""")
-    skill = Skill.from_markdown(str(md_file))
-    assert skill.name == "deploy-check"
-    assert skill.version == "1.0.0"
-    assert "Run tests" in skill.content
+@pytest.fixture
+def engine(mock_db, mock_llm):
+    return SkillEngine(db=mock_db, llm=mock_llm)
 
 
-def test_skill_parse_missing_name(tmp_path):
-    md_file = tmp_path / "bad.md"
-    md_file.write_text("""---
-version: 1.0.0
----
-
-No name here
-""")
-    with pytest.raises(ValueError, match="name"):
-        Skill.from_markdown(str(md_file))
-
-
-def test_skill_to_markdown():
+def test_skill_dataclass():
     skill = Skill(
         name="test",
         version="1.0.0",
         trigger="When testing",
         description="A test skill",
-        content="# Test\n\n## Steps\n1. Do thing",
         tags=["test"],
+        steps=["Do thing"],
+        content="# Test",
     )
-    md = skill.to_markdown()
-    assert "name: test" in md
-    assert "Do thing" in md
+    assert skill.name == "test"
+    assert skill.steps == ["Do thing"]
+
+
+def test_validate_frontmatter_valid():
+    errors = validate_frontmatter(
+        name="test-skill", version="1.0.0", trigger="when testing", description="A test skill",
+    )
+    assert errors == []
+
+
+def test_validate_frontmatter_missing_name():
+    errors = validate_frontmatter(name="", version="1.0.0", trigger="t", description="d")
+    assert any("name" in e for e in errors)
+
+
+def test_validate_frontmatter_bad_name():
+    errors = validate_frontmatter(name="Bad Name", version="1.0.0", trigger="t", description="d")
+    assert any("kebab-case" in e for e in errors)
 
 
 @pytest.mark.asyncio
-async def test_skill_save_and_search(engine, db):
-    skill = Skill(
-        name="deploy-check",
-        version="1.0.0",
-        trigger="When deploying",
-        description="Pre-deployment validation",
-        content="# Deploy\n1. Run tests",
-        tags=["devops"],
-    )
-    await engine.save(skill)
+async def test_create_from_conversation(engine):
+    messages = [
+        {"role": "user", "content": "I need a skill for deploying"},
+        {"role": "assistant", "content": "Here's what I do: run tests"},
+    ]
+    skill = await engine.create_from_conversation(messages)
+    assert skill is not None
+    assert skill["name"] == "deploy-check"
+
+
+@pytest.mark.asyncio
+async def test_search(engine):
     results = await engine.search("deploy")
-    assert len(results) == 1
-    assert results[0].name == "deploy-check"
+    assert results == []
