@@ -46,6 +46,10 @@ class ToolRegistry:
     def schemas(self) -> list[dict[str, Any]]:
         return [tool.to_schema() for tool in self._tools.values()]
 
+    def get_schema(self, name: str) -> dict[str, Any] | None:
+        tool = self._tools.get(name)
+        return tool.to_schema() if tool else None
+
     async def execute(self, name: str, args: dict[str, Any]) -> str:
         if name not in self._tools:
             raise KeyError(f"Tool '{name}' not found")

@@ -57,3 +57,41 @@ async def hashline_edit(args: dict[str, Any]) -> str:
         return result
     except Exception as e:
         return f"Hashline edit error: {type(e).__name__}: {e}"
+
+
+from kageko.tools.registry import ToolRegistry, Tool
+
+HASHLINE_SCHEMA = {
+    "name": "hashline_edit",
+    "description": "Edit source files using anchor-based hashline references. "
+                   "The anchor is the first 8 chars of the content hash of the line to replace.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "file_path": {
+                "type": "string",
+                "description": "Path to the source file to edit",
+            },
+            "anchor": {
+                "type": "string",
+                "description": "First 8 characters of the SHA-256 hash of the original line content",
+            },
+            "new_content": {
+                "type": "string",
+                "description": "The new content to replace the anchored line with",
+            },
+        },
+        "required": ["file_path", "anchor", "new_content"],
+    },
+}
+
+
+def register(registry: ToolRegistry) -> None:
+    """Register hashline_edit tool in the registry."""
+    registry.register(Tool(
+        name="hashline_edit",
+        description=HASHLINE_SCHEMA["description"],
+        parameters=HASHLINE_SCHEMA["parameters"],
+        handler=hashline_edit,
+        category="code",
+    ))

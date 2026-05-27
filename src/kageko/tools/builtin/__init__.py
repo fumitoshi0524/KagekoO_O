@@ -3,6 +3,7 @@ from kageko.tools.builtin.shell_tools import bash_run
 from kageko.tools.builtin.shell_tools import NATIVE_SHELL_TOOL, native_shell_handler
 from kageko.tools.builtin.system_tools import echo, todo_add, todo_list
 from kageko.tools.builtin.hashline_tool import hashline_edit, HASHLINE_TOOL
+from kageko.tools.builtin.hashline_tool import register as _reg_hashline
 from kageko.tools.grep_tool import GREP_TOOL, grep_handler
 from kageko.tools.ast_tool import AST_SUMMARIZE_TOOL, ast_summarize_handler
 
@@ -81,6 +82,8 @@ BUILTIN_TOOLS = [
 def register_all(registry) -> None:
     """Register all builtin tools into the given ToolRegistry."""
     from kageko.tools.registry import Tool
+
+    _reg_hashline(registry)
 
     for spec in BUILTIN_TOOLS:
         if spec.get("fn") is None:
