@@ -58,10 +58,11 @@ class SkillRecord:
 
 @dataclass
 class MemoryRecord:
-    id: int | None
-    key: str
-    value: str
+    id: str
+    content: str
+    tags: str
     source: str
+    session_id: str
     created_at: str
 
 
@@ -72,6 +73,81 @@ class TrajectoryRecord:
     steps_json: str
     answer: str
     created_at: str
+
+
+# ---------------------------------------------------------------------------
+# FTS5 SQL
+# ---------------------------------------------------------------------------
+
+FTS_SQL = """
+-- Unicode61 tokenizer: good for Latin + general text
+CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+    content,
+    tags,
+    source,
+    tokenize='unicode61'
+);
+
+-- Trigram tokenizer: CJK and substring search support
+CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts_trgm USING fts5(
+    content,
+    tokenize='trigram'
+);
+
+-- Auto-sync triggers for memory_fts
+CREATE TRIGGER IF NOT EXISTS memory_ai AFTER INSERT ON memory BEGIN
+    INSERT INTO memory_fts(rowid, content, tags, source)
+    VALUES (new.rowid, new.content, new.tags, new.source);
+END;
+
+CREATE TRIGGER IF NOT EXISTS memory_ad AFTER DELETE ON memory BEGIN
+    DELETE FROM memory_fts WHERE rowid = old.rowid;
+END;
+
+CREATE TRIGGER IF NOT EXISTS memory_au AFTER UPDATE ON memory BEGIN
+    DELETE FROM memory_fts WHERE rowid = old.rowid;
+    INSERT INTO memory_fts(rowid, content, tags, source)
+    VALUES (new.rowid, new.content, new.tags, new.source);
+END;
+
+-- Auto-sync triggers for memory_fts_trgm
+CREATE TRIGGER IF NOT EXISTS memory_trgm_ai AFTER INSERT ON memory BEGIN
+    INSERT INTO memory_fts_trgm(rowid, content)
+    VALUES (new.rowid, new.content);
+END;
+
+CREATE TRIGGER IF NOT EXISTS memory_trgm_ad AFTER DELETE ON memory BEGIN
+    DELETE FROM memory_fts_trgm WHERE rowid = old.rowid;
+END;
+
+CREATE TRIGGER IF NOT EXISTS memory_trgm_au AFTER UPDATE ON memory BEGIN
+    DELETE FROM memory_fts_trgm WHERE rowid = old.rowid;
+    INSERT INTO memory_fts_trgm(rowid, content)
+    VALUES (new.rowid, new.content);
+END;
+
+-- Session FTS (trigram for CJK support in session titles)
+CREATE VIRTUAL TABLE IF NOT EXISTS sessions_fts USING fts5(
+    title,
+    platform,
+    tokenize='trigram'
+);
+
+CREATE TRIGGER IF NOT EXISTS sessions_ai AFTER INSERT ON sessions BEGIN
+    INSERT INTO sessions_fts(rowid, title, platform)
+    VALUES (new.rowid, new.title, new.platform);
+END;
+
+CREATE TRIGGER IF NOT EXISTS sessions_ad AFTER DELETE ON sessions BEGIN
+    DELETE FROM sessions_fts WHERE rowid = old.rowid;
+END;
+
+CREATE TRIGGER IF NOT EXISTS sessions_au AFTER UPDATE ON sessions BEGIN
+    DELETE FROM sessions_fts WHERE rowid = old.rowid;
+    INSERT INTO sessions_fts(rowid, title, platform)
+    VALUES (new.rowid, new.title, new.platform);
+END;
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -102,6 +178,7 @@ class KagekoDB:
         self._write_count = 0
         await self._create_tables()
         await self._migrate_session_title()
+        await self._create_fts_indexes()
 
     async def close(self) -> None:
         if self._db:
@@ -190,11 +267,12 @@ class KagekoDB:
             );
 
             CREATE TABLE IF NOT EXISTS memory (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                key         TEXT NOT NULL,
-                value       TEXT NOT NULL,
+                id          TEXT PRIMARY KEY,
+                content     TEXT NOT NULL DEFAULT '',
+                tags        TEXT NOT NULL DEFAULT '',
                 source      TEXT NOT NULL DEFAULT '',
-                created_at  TEXT NOT NULL
+                session_id  TEXT NOT NULL DEFAULT '',
+                created_at  TEXT NOT NULL DEFAULT ''
             );
 
             CREATE TABLE IF NOT EXISTS curator_log (
@@ -211,11 +289,6 @@ class KagekoDB:
                 content_rowid='id'
             );
 
-            CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
-                key, value,
-                content='memory',
-                content_rowid='id'
-            );
             """
         )
         await self._conn.commit()
@@ -227,6 +300,10 @@ class KagekoDB:
         if "title" not in columns:
             await self._conn.execute("ALTER TABLE sessions ADD COLUMN title TEXT NOT NULL DEFAULT ''")
             await self._conn.commit()
+
+    async def _create_fts_indexes(self) -> None:
+        """Create FTS5 virtual tables and triggers."""
+        await self._conn.executescript(FTS_SQL)
 
     # ---- helpers ----------------------------------------------------------
 
@@ -438,33 +515,37 @@ class KagekoDB:
 
     # ---- memory -----------------------------------------------------------
 
-    async def save_memory(self, key: str, value: str, source: str = "") -> MemoryRecord:
+    async def save_memory(self, content: str, tags: str = "", source: str = "", session_id: str = "") -> MemoryRecord:
         now = _now()
-        cursor = await self._conn.execute(
-            "INSERT INTO memory (key, value, source, created_at) VALUES (?,?,?,?)",
-            (key, value, source, now),
+        mem_id = uuid.uuid4().hex
+        await self._conn.execute(
+            "INSERT INTO memory (id, content, tags, source, session_id, created_at) VALUES (?,?,?,?,?,?)",
+            (mem_id, content, tags, source, session_id, now),
         )
-        row_id = cursor.lastrowid
-        await self._conn.execute("INSERT INTO memory_fts(memory_fts) VALUES ('rebuild')")
         await self._conn.commit()
-        return MemoryRecord(id=row_id, key=key, value=value, source=source, created_at=now)
+        return MemoryRecord(id=mem_id, content=content, tags=tags, source=source, session_id=session_id, created_at=now)
 
-    async def search_memory(self, query: str) -> list[MemoryRecord]:
+    async def search_memory(self, query: str, limit: int = 10) -> list[dict]:
+        """Search memory using FTS5. Falls back to trigram for CJK."""
+        # Try unicode61 first (better relevance for Latin text)
         cursor = await self._conn.execute(
-            """SELECT m.* FROM memory m
-               JOIN memory_fts f ON m.id = f.rowid
-               WHERE memory_fts MATCH ?
-               ORDER BY rank""",
-            (query,),
+            "SELECT m.id, m.content, m.tags, m.source, m.session_id, m.created_at "
+            "FROM memory_fts fts JOIN memory m ON fts.rowid = m.rowid "
+            "WHERE memory_fts MATCH ? ORDER BY rank LIMIT ?",
+            (query, limit),
         )
         rows = await cursor.fetchall()
-        return [
-            MemoryRecord(
-                id=r["id"], key=r["key"], value=r["value"],
-                source=r["source"], created_at=r["created_at"],
-            )
-            for r in rows
-        ]
+        if rows:
+            return [dict(r) for r in rows]
+        # Fallback to trigram (better for CJK / substring)
+        cursor = await self._conn.execute(
+            "SELECT m.id, m.content, m.tags, m.source, m.session_id, m.created_at "
+            "FROM memory_fts_trgm fts JOIN memory m ON fts.rowid = m.rowid "
+            "WHERE memory_fts_trgm MATCH ? ORDER BY rank LIMIT ?",
+            (query, limit),
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
 
     # ---- trajectories -----------------------------------------------------
 

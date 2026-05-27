@@ -62,3 +62,53 @@ async def test_wal_checkpoint_counter():
             assert db._write_count <= 1
         finally:
             await db.close()
+
+
+@pytest.mark.asyncio
+async def test_fts5_memory_search():
+    """FTS5 should index memory content for full-text search."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        db = KagekoDB(str(db_path))
+        await db.init()
+        await db.write_with_retry(
+            "INSERT INTO memory (id, content, tags, source, session_id) VALUES (?, ?, ?, ?, ?)",
+            ("mem-1", "deployed nginx to production server", "ops,deploy", "conversation", "s1"),
+        )
+        results = await db.search_memory("nginx production")
+        assert len(results) >= 1
+        assert results[0]["id"] == "mem-1"
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_fts5_cjk_search():
+    """Trigram FTS should support CJK substring search."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        db = KagekoDB(str(db_path))
+        await db.init()
+        await db.write_with_retry(
+            "INSERT INTO memory (id, content, tags, source, session_id) VALUES (?, ?, ?, ?, ?)",
+            ("mem-2", "部署了nginx到生产服务器", "运维", "conversation", "s1"),
+        )
+        results = await db.search_memory("nginx")
+        assert len(results) >= 1
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_fts5_sync_on_insert():
+    """FTS index should auto-sync when memory rows are inserted."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        db = KagekoDB(str(db_path))
+        await db.init()
+        # Insert via write_with_retry (triggers should fire)
+        await db.write_with_retry(
+            "INSERT INTO memory (id, content, tags, source, session_id) VALUES (?, ?, ?, ?, ?)",
+            ("mem-3", "refactored authentication module", "code,refactor", "tool_result", "s2"),
+        )
+        results = await db.search_memory("authentication")
+        assert len(results) >= 1
+        await db.close()

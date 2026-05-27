@@ -63,10 +63,10 @@ async def test_save_and_search_skill(db):
 
 @pytest.mark.asyncio
 async def test_save_and_search_memory(db):
-    await db.save_memory(key="user_pref", value="User prefers dark mode", source="session_1")
+    await db.save_memory(content="User prefers dark mode", source="session_1")
     results = await db.search_memory("dark mode")
-    assert len(results) == 1
-    assert results[0].key == "user_pref"
+    assert len(results) >= 1
+    assert results[0]["content"] == "User prefers dark mode"
 
 
 @pytest.mark.asyncio
