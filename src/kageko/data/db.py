@@ -7,6 +7,10 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+import random
+
+import asyncio
+
 import aiosqlite
 
 
@@ -27,6 +31,7 @@ class SessionRecord:
     chat_id: str
     created_at: str
     metadata: dict = field(default_factory=dict)
+    title: str = ""
 
 
 @dataclass
@@ -78,22 +83,47 @@ class KagekoDB:
     """Async SQLite wrapper with FTS5 virtual tables for skills and memory."""
 
     def __init__(self, path: str = "kageko.db") -> None:
-        self._path = path
+        from pathlib import Path
+        self._path = str(Path(path).expanduser())
         self._db: aiosqlite.Connection | None = None
 
     # ---- lifecycle --------------------------------------------------------
 
     async def init(self) -> None:
+        from pathlib import Path
+        db_path = Path(self._path)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
         self._db = await aiosqlite.connect(self._path)
         self._db.row_factory = aiosqlite.Row
         await self._db.execute("PRAGMA journal_mode=WAL")
+        await self._db.execute("PRAGMA synchronous=NORMAL")
         await self._db.execute("PRAGMA foreign_keys=ON")
+        self._write_count = 0
         await self._create_tables()
+        await self._migrate_session_title()
 
     async def close(self) -> None:
         if self._db:
             await self._db.close()
             self._db = None
+
+    async def write_with_retry(
+        self, sql: str, params: tuple = (), max_retries: int = 15
+    ) -> None:
+        """Execute a write with jitter retry on contention."""
+        for attempt in range(max_retries):
+            try:
+                await self._conn.execute("BEGIN IMMEDIATE")
+                await self._conn.execute(sql, params)
+                await self._conn.commit()
+                self._write_count += 1
+                if self._write_count % 50 == 0:
+                    await self._conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+                    self._write_count = 0
+                return
+            except Exception:
+                await asyncio.sleep(random.uniform(0.02, 0.15))
+        raise RuntimeError("Max write retries exceeded")
 
     @property
     def _conn(self) -> aiosqlite.Connection:
@@ -181,6 +211,14 @@ class KagekoDB:
         )
         await self._conn.commit()
 
+    async def _migrate_session_title(self) -> None:
+        """Add title column to sessions if it doesn't exist."""
+        cursor = await self._conn.execute("PRAGMA table_info(sessions)")
+        columns = [row[1] for row in await cursor.fetchall()]
+        if "title" not in columns:
+            await self._conn.execute("ALTER TABLE sessions ADD COLUMN title TEXT NOT NULL DEFAULT ''")
+            await self._conn.commit()
+
     # ---- helpers ----------------------------------------------------------
 
     async def list_tables(self) -> list[str]:
@@ -197,16 +235,17 @@ class KagekoDB:
         platform: str,
         chat_id: str,
         metadata: dict | None = None,
+        title: str = "",
     ) -> SessionRecord:
         sid = uuid.uuid4().hex
         now = _now()
         meta = json.dumps(metadata or {})
         await self._conn.execute(
-            "INSERT INTO sessions (id, platform, chat_id, created_at, metadata) VALUES (?,?,?,?,?)",
-            (sid, platform, chat_id, now, meta),
+            "INSERT INTO sessions (id, platform, chat_id, created_at, metadata, title) VALUES (?,?,?,?,?,?)",
+            (sid, platform, chat_id, now, meta, title),
         )
         await self._conn.commit()
-        return SessionRecord(id=sid, platform=platform, chat_id=chat_id, created_at=now, metadata=metadata or {})
+        return SessionRecord(id=sid, platform=platform, chat_id=chat_id, created_at=now, metadata=metadata or {}, title=title)
 
     async def list_sessions(self, limit: int = 20) -> list[SessionRecord]:
         cursor = await self._conn.execute(
@@ -217,6 +256,7 @@ class KagekoDB:
             SessionRecord(
                 id=r["id"], platform=r["platform"], chat_id=r["chat_id"],
                 created_at=r["created_at"], metadata=json.loads(r["metadata"]),
+                title=r["title"] if "title" in r.keys() else "",
             )
             for r in rows
         ]
@@ -231,11 +271,28 @@ class KagekoDB:
         return SessionRecord(
             id=row["id"], platform=row["platform"], chat_id=row["chat_id"],
             created_at=row["created_at"], metadata=json.loads(row["metadata"]),
+            title=row["title"] if "title" in row.keys() else "",
         )
 
     async def delete_session(self, session_id: str) -> None:
         await self._conn.execute("DELETE FROM messages WHERE session_id=?", (session_id,))
         await self._conn.execute("DELETE FROM sessions WHERE id=?", (session_id,))
+        await self._conn.commit()
+
+    async def delete_messages_by_ids(self, ids: list[int]) -> None:
+        """Delete specific messages by their IDs."""
+        if not ids:
+            return
+        placeholders = ",".join("?" * len(ids))
+        await self._conn.execute(
+            f"DELETE FROM messages WHERE id IN ({placeholders})", ids,
+        )
+        await self._conn.commit()
+
+    async def set_session_title(self, session_id: str, title: str) -> None:
+        await self._conn.execute(
+            "UPDATE sessions SET title=? WHERE id=?", (title, session_id)
+        )
         await self._conn.commit()
 
     async def get_session(self, session_id: str) -> SessionRecord | None:
@@ -251,6 +308,7 @@ class KagekoDB:
             chat_id=row["chat_id"],
             created_at=row["created_at"],
             metadata=json.loads(row["metadata"]),
+            title=row["title"] if "title" in row.keys() else "",
         )
 
     # ---- messages ---------------------------------------------------------
@@ -320,11 +378,8 @@ class KagekoDB:
                  updated_at=excluded.updated_at""",
             (name, version, trigger, description, content, tags_json, now, now),
         )
-        # Keep FTS in sync
-        await self._conn.execute(
-            "INSERT INTO skills_fts(skills_fts, rowid, name, trigger, description, content, tags) VALUES ('rebuild', (SELECT id FROM skills WHERE name=?), ?,?,?,?,?)",
-            (name, name, trigger, description, content, " ".join(tags)),
-        )
+        # Keep FTS in sync — rebuild the index from the backing table
+        await self._conn.execute("INSERT INTO skills_fts(skills_fts) VALUES ('rebuild')")
         await self._conn.commit()
         return SkillRecord(
             id=None, name=name, version=version, trigger=trigger,
@@ -381,10 +436,7 @@ class KagekoDB:
             (key, value, source, now),
         )
         row_id = cursor.lastrowid
-        await self._conn.execute(
-            "INSERT INTO memory_fts(memory_fts, rowid, key, value) VALUES ('rebuild', ?, ?, ?)",
-            (row_id, key, value),
-        )
+        await self._conn.execute("INSERT INTO memory_fts(memory_fts) VALUES ('rebuild')")
         await self._conn.commit()
         return MemoryRecord(id=row_id, key=key, value=value, source=source, created_at=now)
 
@@ -435,3 +487,12 @@ class KagekoDB:
             )
             for r in rows
         ]
+
+    async def log_curator_action(self, action: str, detail: str) -> None:
+        """Log a curator maintenance action."""
+        now = _now()
+        await self._conn.execute(
+            "INSERT INTO curator_log (action, detail, created_at) VALUES (?, ?, ?)",
+            (action, detail, now),
+        )
+        await self._conn.commit()
