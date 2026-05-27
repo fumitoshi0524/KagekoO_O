@@ -17,6 +17,8 @@ class Message:
     content: str
     tool_calls: list[ToolCall] = field(default_factory=list)
     tool_call_id: str | None = None
+    tool_name: str | None = None
+    images: list[dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"role": self.role, "content": self.content}

@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
+from kageko.agent.context import ContextBudget, ContextCompressor
 from kageko.agent.permissions import Decision, PermissionPipeline
 from kageko.llm import LLMAdapter
 from kageko.tools.registry import ToolRegistry
@@ -30,12 +31,20 @@ class AgentEngine:
         permissions: PermissionPipeline,
         max_turns: int = 20,
         system_prompt: str = "",
+        context_window_size: int = 8000,
+        on_tool_start: Any = None,
+        on_tool_end: Any = None,
+        memory: Any = None,
     ):
         self.llm = llm
         self.tool_registry = tool_registry
         self.permissions = permissions
         self.max_turns = max_turns
         self.system_prompt = system_prompt
+        budget = ContextBudget(max_tokens=context_window_size)
+        self.compressor = ContextCompressor(memory=memory, llm=llm, budget=budget)
+        self.on_tool_start = on_tool_start
+        self.on_tool_end = on_tool_end
 
     def _prepare_messages(self, message: str | list[Message]) -> list[Message]:
         """Convert input to message list and prepend system prompt if configured."""
@@ -70,11 +79,19 @@ class AgentEngine:
         ctx = AgentContext(messages=messages, trajectory=trajectory)
         return await self._run_loop(ctx, record_trajectory=True)
 
+    def _maybe_compress(self, messages: list[Message]) -> list[Message]:
+        """Check context size and compress if needed."""
+        estimated = self.compressor.estimate_tokens(messages)
+        if estimated > self.compressor.max_tokens:
+            return self.compressor.compress(messages, estimated)
+        return messages
+
     async def _run_loop(self, ctx: AgentContext, record_trajectory: bool) -> AgentResult:
         schemas = self.tool_registry.schemas()
 
         while ctx.turn_count < self.max_turns:
             ctx.turn_count += 1
+            ctx.messages = self._maybe_compress(ctx.messages)
             response = await self.llm.chat(ctx.messages, tools=schemas)
             ctx.tokens_used += response.tokens_used
 
@@ -118,28 +135,30 @@ class AgentEngine:
         """Execute tool calls in parallel using asyncio.gather."""
 
         async def _execute_one(tc: ToolCall) -> ToolResult:
+            if self.on_tool_start:
+                await self.on_tool_start(tc.name, tc.args)
             decision = await self.permissions.check(tc)
             if decision == Decision.DENY:
-                return ToolResult(
-                    tool_call_id=tc.id,
-                    content=f"[DENIED] Tool '{tc.name}' blocked by security policy",
-                    is_error=True,
-                )
+                result = ToolResult(tool_call_id=tc.id, content=f"[DENIED] Tool '{tc.name}' blocked by security policy", is_error=True)
+                if self.on_tool_end:
+                    await self.on_tool_end(tc.name, result.content, result.is_error)
+                return result
             if decision == Decision.EXECUTE_IN_SANDBOX:
-                return ToolResult(
-                    tool_call_id=tc.id,
-                    content="[SANDBOX] Not yet implemented",
-                    is_error=True,
-                )
+                result = ToolResult(tool_call_id=tc.id, content="[SANDBOX ERROR] Sandbox execution is not available. Set sandbox=false or install sandbox runtime.", is_error=True)
+                if self.on_tool_end:
+                    await self.on_tool_end(tc.name, result.content, result.is_error)
+                return result
             try:
                 content = await self.tool_registry.execute(tc.name, tc.args)
-                return ToolResult(tool_call_id=tc.id, content=content)
+                result = ToolResult(tool_call_id=tc.id, content=content)
+                if self.on_tool_end:
+                    await self.on_tool_end(tc.name, result.content, result.is_error)
+                return result
             except Exception as e:
-                return ToolResult(
-                    tool_call_id=tc.id,
-                    content=f"[ERROR] {type(e).__name__}: {e}",
-                    is_error=True,
-                )
+                result = ToolResult(tool_call_id=tc.id, content=f"[ERROR] {type(e).__name__}: {e}", is_error=True)
+                if self.on_tool_end:
+                    await self.on_tool_end(tc.name, result.content, result.is_error)
+                return result
 
         results = await asyncio.gather(*[_execute_one(tc) for tc in tool_calls])
         return list(results)
@@ -157,6 +176,7 @@ class AgentEngine:
         schemas = self.tool_registry.schemas()
 
         for _turn in range(self.max_turns):
+            messages = self._maybe_compress(messages)
             token_stream = self.llm.chat_stream(messages, tools=schemas)
 
             if ttsr_rules:
