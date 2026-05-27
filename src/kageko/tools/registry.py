@@ -25,8 +25,8 @@ class ToolRegistry:
         self._tools: dict[str, Tool] = {}
         self._categories: dict[str, list[str]] = {}
 
-    def register(self, tool: Tool) -> None:
-        if tool.name in self._tools:
+    def register(self, tool: Tool, *, override: bool = False) -> None:
+        if tool.name in self._tools and not override:
             raise ValueError(f"Tool '{tool.name}' is already registered")
         self._tools[tool.name] = tool
         self._categories.setdefault(tool.category, []).append(tool.name)
@@ -36,6 +36,9 @@ class ToolRegistry:
 
     def list_names(self) -> list[str]:
         return list(self._tools.keys())
+
+    def list(self) -> list[Tool]:
+        return list(self._tools.values())
 
     def categories(self) -> dict[str, list[str]]:
         return dict(self._categories)

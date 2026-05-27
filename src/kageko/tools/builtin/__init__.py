@@ -6,6 +6,26 @@ from kageko.tools.builtin.hashline_tool import hashline_edit, HASHLINE_TOOL
 from kageko.tools.grep_tool import GREP_TOOL, grep_handler
 from kageko.tools.ast_tool import AST_SUMMARIZE_TOOL, ast_summarize_handler
 
+DELEGATE_TOOL = {
+    "name": "delegate",
+    "description": "Delegate a task to a subagent. Use for parallel work or isolated subtasks.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "task": {"type": "string", "description": "The task to delegate to the subagent"},
+            "allowed_tools": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional list of tool names the subagent can use",
+            },
+            "max_turns": {"type": "integer", "description": "Max turns for the subagent (default 10)", "default": 10},
+        },
+        "required": ["task"],
+    },
+    "category": "agent",
+    "fn": None,  # Will be wired up at runtime via make_delegate_handler
+}
+
 BUILTIN_TOOLS = [
     {"name": "file_read", "fn": file_read, "category": "file",
      "description": "Read the contents of a file",
@@ -54,6 +74,27 @@ BUILTIN_TOOLS = [
      "parameters": AST_SUMMARIZE_TOOL["parameters"],
      "fn": ast_summarize_handler,
      "category": AST_SUMMARIZE_TOOL["category"]},
+
+    DELEGATE_TOOL,
 ]
 
-__all__ = ["BUILTIN_TOOLS"]
+def register_all(registry) -> None:
+    """Register all builtin tools into the given ToolRegistry."""
+    from kageko.tools.registry import Tool
+
+    for spec in BUILTIN_TOOLS:
+        if spec.get("fn") is None:
+            continue  # Skip tools without a handler (e.g. delegate, wired at runtime)
+        if spec["name"] in registry.list_names():
+            continue  # Skip tools already registered
+        tool = Tool(
+            name=spec["name"],
+            description=spec.get("description", ""),
+            parameters=spec.get("parameters", {}),
+            handler=spec["fn"],
+            category=spec.get("category", "general"),
+        )
+        registry.register(tool)
+
+
+__all__ = ["BUILTIN_TOOLS", "DELEGATE_TOOL", "register_all"]

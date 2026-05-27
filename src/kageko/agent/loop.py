@@ -6,13 +6,17 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from kageko.agent.context import ContextBudget, ContextCompressor
-from kageko.agent.permissions import Decision, PermissionPipeline
 from kageko.llm import LLMAdapter
 from kageko.tools.registry import ToolRegistry
 from kageko.types import AgentMode, AgentResult, Message, QAOATrajectory, StreamToken, ToolCall, ToolResult
+
+if TYPE_CHECKING:
+    from kageko.agent.guardrails import ToolGuardrail
+    from kageko.agent.ttsr import StreamRule
+    from kageko.learning.memory import MemoryManager
 
 
 @dataclass
@@ -26,25 +30,64 @@ class AgentContext:
 class AgentEngine:
     def __init__(
         self,
-        llm: LLMAdapter,
-        tool_registry: ToolRegistry,
-        permissions: PermissionPipeline,
+        config: "AgentConfig | None" = None,
+        registry: ToolRegistry | None = None,
+        memory: "MemoryManager | None" = None,
+        compressor: "ContextCompressor | None" = None,
+        guardrails: "ToolGuardrail | None" = None,
+        ttsr_rules: list[StreamRule] | None = None,
+        # Legacy direct-parameter support
+        llm: LLMAdapter | None = None,
+        tool_registry: ToolRegistry | None = None,
+        permissions: Any = None,
         max_turns: int = 20,
         system_prompt: str = "",
         context_window_size: int = 8000,
         on_tool_start: Any = None,
         on_tool_end: Any = None,
-        memory: Any = None,
     ):
-        self.llm = llm
-        self.tool_registry = tool_registry
+        from kageko.config import AgentConfig
+
+        # Support both new (config-based) and legacy (direct param) construction
+        if config is not None:
+            self.config = config
+            self.llm = llm or LLMAdapter(config.model, config.api_key, config.base_url)
+            self.max_turns = config.max_turns
+            self.system_prompt = config.system_prompt
+            self.context_window_size = config.context_window_size
+        else:
+            # Legacy path
+            self.config = AgentConfig(
+                model=getattr(llm, "model", "") if llm else "",
+                max_turns=max_turns,
+                system_prompt=system_prompt,
+                context_window_size=context_window_size,
+            )
+            self.llm = llm  # type: ignore[assignment]
+            self.max_turns = max_turns
+            self.system_prompt = system_prompt
+            self.context_window_size = context_window_size
+
+        self.registry = registry or tool_registry or ToolRegistry()
+        self.memory = memory
+        self.compressor = compressor
+        self.guardrails = guardrails
         self.permissions = permissions
-        self.max_turns = max_turns
-        self.system_prompt = system_prompt
-        budget = ContextBudget(max_tokens=context_window_size)
-        self.compressor = ContextCompressor(memory=memory, llm=llm, budget=budget)
         self.on_tool_start = on_tool_start
         self.on_tool_end = on_tool_end
+
+        # TTSR interceptor
+        from kageko.agent.ttsr import StreamInterceptor
+        self.stream_interceptor = StreamInterceptor(rules=ttsr_rules) if ttsr_rules else None
+
+        # If no compressor was injected, create one from the budget
+        if self.compressor is None and self.memory is not None:
+            budget = ContextBudget(max_tokens=self.context_window_size)
+            self.compressor = ContextCompressor(memory=self.memory, llm=self.llm, budget=budget)
+
+        # Register builtin tools
+        from kageko.tools.builtin import register_all
+        register_all(self.registry)
 
     def _prepare_messages(self, message: str | list[Message]) -> list[Message]:
         """Convert input to message list and prepend system prompt if configured."""
@@ -61,107 +104,136 @@ class AgentEngine:
 
         return messages
 
-    async def run(self, message: str | list[Message], mode: AgentMode = AgentMode.TOOL_USE) -> AgentResult:
-        if mode == AgentMode.QAOA:
-            return await self._qaoa_loop(message)
-        return await self._tool_use_loop(message)
-
-    async def _tool_use_loop(self, message: str | list[Message]) -> AgentResult:
+    async def run(self, message: str, context: "AgentContext | None" = None) -> AgentResult:
+        """Main agent loop with memory, compression, and guardrails integration."""
+        context = context or AgentContext()
         messages = self._prepare_messages(message)
-        ctx = AgentContext(messages=messages)
-        return await self._run_loop(ctx, record_trajectory=False)
+        context.messages = messages
 
-    async def _qaoa_loop(self, message: str | list[Message]) -> AgentResult:
-        messages = self._prepare_messages(message)
-        # Use last user message as query for trajectory
-        query = next((m.content for m in reversed(messages) if m.role == "user"), "")
-        trajectory = QAOATrajectory(query=query)
-        ctx = AgentContext(messages=messages, trajectory=trajectory)
-        return await self._run_loop(ctx, record_trajectory=True)
+        # Memory prefetch
+        if self.memory:
+            try:
+                memories = await self.memory.prefetch(message, limit=5)
+                if memories:
+                    memory_text = "\n".join(f"- {m.content}" for m in memories)
+                    messages.insert(
+                        0,
+                        Message(role="system", content=f"[Relevant memories]\n{memory_text}"),
+                    )
+            except Exception:
+                logging.getLogger("kageko.agent.loop").debug("Memory prefetch failed", exc_info=True)
 
-    def _maybe_compress(self, messages: list[Message]) -> list[Message]:
-        """Check context size and compress if needed."""
-        estimated = self.compressor.estimate_tokens(messages)
-        if estimated > self.compressor.max_tokens:
-            return self.compressor.compress(messages, estimated)
-        return messages
+        schemas = self.registry.schemas()
 
-    async def _run_loop(self, ctx: AgentContext, record_trajectory: bool) -> AgentResult:
-        schemas = self.tool_registry.schemas()
+        for turn in range(self.max_turns):
+            context.turn_count = turn + 1
 
-        while ctx.turn_count < self.max_turns:
-            ctx.turn_count += 1
-            ctx.messages = self._maybe_compress(ctx.messages)
-            response = await self.llm.chat(ctx.messages, tools=schemas)
-            ctx.tokens_used += response.tokens_used
+            # Check context budget and compress if needed
+            if self.compressor:
+                estimated = self.compressor.estimate_tokens(messages)
+                if estimated > self.context_window_size * 0.8:
+                    messages = self.compressor.compress(messages, estimated)
 
-            if not response.has_tool_calls():
-                ctx.messages.append(Message(role="assistant", content=response.content))
-                if ctx.trajectory:
-                    ctx.trajectory.set_answer(response.content)
-                return AgentResult(
-                    answer=response.content,
-                    turn_count=ctx.turn_count,
-                    tokens_used=ctx.tokens_used,
-                    trajectory=ctx.trajectory,
-                    messages=ctx.messages,
-                )
+            # Get LLM response
+            response = await self.llm.chat(messages, tools=schemas)
+            context.tokens_used += response.tokens_used
 
-            results = await self._execute_tool_calls(response.tool_calls)
-            ctx.messages.append(Message(
+            assistant_msg = Message(
                 role="assistant",
                 content=response.content or "",
                 tool_calls=response.tool_calls,
-            ))
-            for result in results:
-                ctx.messages.append(result.to_message())
-                if record_trajectory and ctx.trajectory:
-                    matching_call = next(
-                        (tc for tc in response.tool_calls if tc.id == result.tool_call_id),
-                        None,
+            )
+            messages.append(assistant_msg)
+
+            if not response.has_tool_calls():
+                # Memory sync after completion
+                if self.memory:
+                    try:
+                        await self.memory.sync_turn(type("Turn", (), {
+                            "user": message,
+                            "assistant": response.content,
+                        })())
+                    except Exception:
+                        logging.getLogger("kageko.agent.loop").debug("Memory sync failed", exc_info=True)
+
+                return AgentResult(
+                    answer=response.content,
+                    turn_count=turn + 1,
+                    tokens_used=context.tokens_used,
+                    messages=messages,
+                )
+
+            for tc in response.tool_calls:
+                # Guardrails check
+                if self.guardrails:
+                    from kageko.agent.guardrails import ToolCallSignature
+                    sig = ToolCallSignature(tc.name, tc.args)
+                    decision = self.guardrails.check(sig)
+                    if decision.action == "block":
+                        result = ToolResult(
+                            tool_call_id=tc.id,
+                            content=decision.message,
+                            is_error=True,
+                        )
+                        messages.append(result.to_message())
+                        continue
+                    elif decision.action == "halt":
+                        return AgentResult(
+                            answer=f"Stopped: {decision.message}",
+                            turn_count=turn + 1,
+                            tokens_used=context.tokens_used,
+                            messages=messages,
+                        )
+
+                # Permission check (legacy support)
+                if self.permissions:
+                    from kageko.agent.permissions import Decision
+                    decision = await self.permissions.check(tc)
+                    if decision == Decision.DENY:
+                        result = ToolResult(
+                            tool_call_id=tc.id,
+                            content=f"[DENIED] Tool '{tc.name}' blocked by security policy",
+                            is_error=True,
+                        )
+                        messages.append(result.to_message())
+                        if self.on_tool_end:
+                            await self.on_tool_end(tc.name, result.content, result.is_error)
+                        continue
+                    if decision == Decision.EXECUTE_IN_SANDBOX:
+                        result = ToolResult(
+                            tool_call_id=tc.id,
+                            content="[SANDBOX ERROR] Sandbox execution is not available.",
+                            is_error=True,
+                        )
+                        messages.append(result.to_message())
+                        if self.on_tool_end:
+                            await self.on_tool_end(tc.name, result.content, result.is_error)
+                        continue
+
+                if self.on_tool_start:
+                    await self.on_tool_start(tc.name, tc.args)
+
+                try:
+                    content = await self.registry.execute(tc.name, tc.args)
+                    result = ToolResult(tool_call_id=tc.id, content=content)
+                except Exception as e:
+                    result = ToolResult(
+                        tool_call_id=tc.id,
+                        content=f"[ERROR] {type(e).__name__}: {e}",
+                        is_error=True,
                     )
-                    if matching_call:
-                        ctx.trajectory.step(matching_call, result)
+
+                if self.on_tool_end:
+                    await self.on_tool_end(tc.name, result.content, result.is_error)
+
+                messages.append(result.to_message())
 
         return AgentResult(
             answer="(max turns reached)",
-            turn_count=ctx.turn_count,
-            tokens_used=ctx.tokens_used,
-            trajectory=ctx.trajectory,
-            messages=ctx.messages,
+            turn_count=self.max_turns,
+            tokens_used=context.tokens_used,
+            messages=messages,
         )
-
-    async def _execute_tool_calls(self, tool_calls: list[ToolCall]) -> list[ToolResult]:
-        """Execute tool calls in parallel using asyncio.gather."""
-
-        async def _execute_one(tc: ToolCall) -> ToolResult:
-            if self.on_tool_start:
-                await self.on_tool_start(tc.name, tc.args)
-            decision = await self.permissions.check(tc)
-            if decision == Decision.DENY:
-                result = ToolResult(tool_call_id=tc.id, content=f"[DENIED] Tool '{tc.name}' blocked by security policy", is_error=True)
-                if self.on_tool_end:
-                    await self.on_tool_end(tc.name, result.content, result.is_error)
-                return result
-            if decision == Decision.EXECUTE_IN_SANDBOX:
-                result = ToolResult(tool_call_id=tc.id, content="[SANDBOX ERROR] Sandbox execution is not available. Set sandbox=false or install sandbox runtime.", is_error=True)
-                if self.on_tool_end:
-                    await self.on_tool_end(tc.name, result.content, result.is_error)
-                return result
-            try:
-                content = await self.tool_registry.execute(tc.name, tc.args)
-                result = ToolResult(tool_call_id=tc.id, content=content)
-                if self.on_tool_end:
-                    await self.on_tool_end(tc.name, result.content, result.is_error)
-                return result
-            except Exception as e:
-                result = ToolResult(tool_call_id=tc.id, content=f"[ERROR] {type(e).__name__}: {e}", is_error=True)
-                if self.on_tool_end:
-                    await self.on_tool_end(tc.name, result.content, result.is_error)
-                return result
-
-        results = await asyncio.gather(*[_execute_one(tc) for tc in tool_calls])
-        return list(results)
 
     async def run_stream(
         self,
@@ -173,10 +245,14 @@ class AgentEngine:
         from kageko.agent.ttsr import Correction, StreamInterceptor
 
         messages = self._prepare_messages(message)
-        schemas = self.tool_registry.schemas()
+        schemas = self.registry.schemas()
 
         for _turn in range(self.max_turns):
-            messages = self._maybe_compress(messages)
+            if self.compressor:
+                estimated = self.compressor.estimate_tokens(messages)
+                if estimated > self.context_window_size * 0.8:
+                    messages = self.compressor.compress(messages, estimated)
+
             token_stream = self.llm.chat_stream(messages, tools=schemas)
 
             if ttsr_rules:
@@ -204,9 +280,27 @@ class AgentEngine:
                         content=full_content,
                         tool_calls=tool_calls,
                     ))
-                    results = await self._execute_tool_calls(tool_calls)
-                    for result in results:
-                        messages.append(result.to_message())
+                    for tc in tool_calls:
+                        if self.guardrails:
+                            from kageko.agent.guardrails import ToolCallSignature
+                            sig = ToolCallSignature(tc.name, tc.args)
+                            decision = self.guardrails.check(sig)
+                            if decision.action in ("block", "halt"):
+                                messages.append(Message(
+                                    role="tool",
+                                    content=decision.message,
+                                    tool_call_id=tc.id,
+                                ))
+                                continue
+                        try:
+                            content = await self.registry.execute(tc.name, tc.args)
+                            messages.append(Message(role="tool", content=content, tool_call_id=tc.id))
+                        except Exception as e:
+                            messages.append(Message(
+                                role="tool",
+                                content=f"[ERROR] {type(e).__name__}: {e}",
+                                tool_call_id=tc.id,
+                            ))
                     continue
 
                 messages.append(Message(role="assistant", content=full_content))
@@ -231,9 +325,16 @@ class AgentEngine:
 
             tool_calls = self._reconstruct_tool_calls(tool_tokens)
             messages.append(Message(role="assistant", content=full_content, tool_calls=tool_calls))
-            results = await self._execute_tool_calls(tool_calls)
-            for result in results:
-                messages.append(result.to_message())
+            for tc in tool_calls:
+                try:
+                    content = await self.registry.execute(tc.name, tc.args)
+                    messages.append(Message(role="tool", content=content, tool_call_id=tc.id))
+                except Exception as e:
+                    messages.append(Message(
+                        role="tool",
+                        content=f"[ERROR] {type(e).__name__}: {e}",
+                        tool_call_id=tc.id,
+                    ))
             continue
 
         yield StreamToken(text="(max turns reached)")
