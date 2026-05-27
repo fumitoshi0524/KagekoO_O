@@ -62,3 +62,43 @@ async def test_create_from_conversation(engine):
     skill = await engine.create_from_conversation(messages)
     assert skill is not None
     assert skill["name"] == "deploy-check"
+
+
+@pytest.mark.asyncio
+async def test_tool_generator_detect_pattern(mock_db):
+    from kageko.learning.tools import ToolGenerator
+
+    llm = AsyncMock()
+    llm.chat = AsyncMock(return_value=MagicMock(content='{"name": "git_status", "category": "shell", "description": "Get git status", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}, "implementation": "def execute(path): return \\"ok\\""}'))
+
+    mock_db.get_recent_trajectories = AsyncMock(return_value=[
+        {"actions": [{"tool": "run_bash", "args": {"command": "git status"}}]},
+        {"actions": [{"tool": "run_bash", "args": {"command": "git status"}}]},
+        {"actions": [{"tool": "run_bash", "args": {"command": "git status"}}]},
+        {"actions": [{"tool": "run_bash", "args": {"command": "git status"}}]},
+    ])
+
+    gen = ToolGenerator(db=mock_db, llm=llm)
+    tool_def = await gen.analyze_and_generate()
+    assert tool_def is not None
+    assert tool_def["name"] == "git_status"
+
+
+@pytest.mark.asyncio
+async def test_tool_generator_hot_load(mock_db):
+    from kageko.learning.tools import ToolGenerator
+    from kageko.tools.registry import ToolRegistry
+
+    llm = AsyncMock()
+    registry = ToolRegistry()
+    gen = ToolGenerator(db=mock_db, llm=llm, registry=registry)
+    tool_def = {
+        "name": "echo_tool",
+        "category": "utility",
+        "description": "Echo input",
+        "parameters": {"type": "object", "properties": {"text": {"type": "string"}}},
+        "implementation": "def execute(text): return text",
+    }
+    gen.hot_load(tool_def)
+    names = [s["name"] for s in registry.schemas()]
+    assert "echo_tool" in names
