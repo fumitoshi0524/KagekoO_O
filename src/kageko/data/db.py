@@ -80,6 +80,72 @@ class TrajectoryRecord:
 # FTS5 SQL
 # ---------------------------------------------------------------------------
 
+SCHEMA_SQL = """
+    CREATE TABLE IF NOT EXISTS sessions (
+        id          TEXT PRIMARY KEY,
+        platform    TEXT NOT NULL,
+        chat_id     TEXT NOT NULL,
+        created_at  TEXT NOT NULL,
+        metadata    TEXT NOT NULL DEFAULT '{}',
+        summary     TEXT NOT NULL DEFAULT '',
+        title       TEXT NOT NULL DEFAULT ''
+    );
+
+    CREATE TABLE IF NOT EXISTS messages (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id  TEXT NOT NULL REFERENCES sessions(id),
+        role        TEXT NOT NULL,
+        content     TEXT NOT NULL,
+        created_at  TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS skills (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        name        TEXT NOT NULL UNIQUE,
+        version     TEXT NOT NULL,
+        trigger     TEXT NOT NULL DEFAULT '',
+        description TEXT NOT NULL DEFAULT '',
+        content     TEXT NOT NULL DEFAULT '',
+        tags        TEXT NOT NULL DEFAULT '[]',
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS tools (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        name        TEXT NOT NULL UNIQUE,
+        description TEXT NOT NULL DEFAULT '',
+        schema_json TEXT NOT NULL DEFAULT '{}',
+        enabled     INTEGER NOT NULL DEFAULT 1,
+        created_at  TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS trajectories (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        query       TEXT NOT NULL,
+        steps_json  TEXT NOT NULL DEFAULT '[]',
+        answer      TEXT NOT NULL DEFAULT '',
+        created_at  TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS memory (
+        id          TEXT PRIMARY KEY,
+        content     TEXT NOT NULL DEFAULT '',
+        tags        TEXT NOT NULL DEFAULT '',
+        source      TEXT NOT NULL DEFAULT '',
+        session_id  TEXT NOT NULL DEFAULT '',
+        created_at  TEXT NOT NULL DEFAULT ''
+    );
+
+    CREATE TABLE IF NOT EXISTS curator_log (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        action      TEXT NOT NULL,
+        detail      TEXT NOT NULL DEFAULT '',
+        created_at  TEXT NOT NULL
+    );
+"""
+
+
 FTS_SQL = """
 -- Unicode61 tokenizer: good for Latin + general text
 CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
@@ -184,6 +250,7 @@ class KagekoDB:
         await self._rebuild_sessions_fts()
         await self._rebuild_memory_table()
         await self._create_fts_indexes()
+        await self._reconcile_columns()
 
     async def close(self) -> None:
         if self._db:
@@ -224,77 +291,14 @@ class KagekoDB:
     # ---- schema -----------------------------------------------------------
 
     async def _create_tables(self) -> None:
+        await self._conn.executescript(SCHEMA_SQL)
         await self._conn.executescript(
             """
-            CREATE TABLE IF NOT EXISTS sessions (
-                id          TEXT PRIMARY KEY,
-                platform    TEXT NOT NULL,
-                chat_id     TEXT NOT NULL,
-                created_at  TEXT NOT NULL,
-                metadata    TEXT NOT NULL DEFAULT '{}',
-                summary     TEXT NOT NULL DEFAULT ''
-            );
-
-            CREATE TABLE IF NOT EXISTS messages (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id  TEXT NOT NULL REFERENCES sessions(id),
-                role        TEXT NOT NULL,
-                content     TEXT NOT NULL,
-                created_at  TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS skills (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                name        TEXT NOT NULL UNIQUE,
-                version     TEXT NOT NULL,
-                trigger     TEXT NOT NULL DEFAULT '',
-                description TEXT NOT NULL DEFAULT '',
-                content     TEXT NOT NULL DEFAULT '',
-                tags        TEXT NOT NULL DEFAULT '[]',
-                created_at  TEXT NOT NULL,
-                updated_at  TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS tools (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                name        TEXT NOT NULL UNIQUE,
-                description TEXT NOT NULL DEFAULT '',
-                schema_json TEXT NOT NULL DEFAULT '{}',
-                enabled     INTEGER NOT NULL DEFAULT 1,
-                created_at  TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS trajectories (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                query       TEXT NOT NULL,
-                steps_json  TEXT NOT NULL DEFAULT '[]',
-                answer      TEXT NOT NULL DEFAULT '',
-                created_at  TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS memory (
-                id          TEXT PRIMARY KEY,
-                content     TEXT NOT NULL DEFAULT '',
-                tags        TEXT NOT NULL DEFAULT '',
-                source      TEXT NOT NULL DEFAULT '',
-                session_id  TEXT NOT NULL DEFAULT '',
-                created_at  TEXT NOT NULL DEFAULT ''
-            );
-
-            CREATE TABLE IF NOT EXISTS curator_log (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                action      TEXT NOT NULL,
-                detail      TEXT NOT NULL DEFAULT '',
-                created_at  TEXT NOT NULL
-            );
-
-            -- FTS5 virtual tables
             CREATE VIRTUAL TABLE IF NOT EXISTS skills_fts USING fts5(
                 name, trigger, description, content, tags,
                 content='skills',
                 content_rowid='id'
             );
-
             """
         )
         await self._conn.commit()
@@ -366,6 +370,49 @@ class KagekoDB:
     async def _create_fts_indexes(self) -> None:
         """Create FTS5 virtual tables and triggers."""
         await self._conn.executescript(FTS_SQL)
+
+    async def _reconcile_columns(self) -> None:
+        """Declarative schema reconciliation.
+
+        Parses SCHEMA_SQL to find declared columns, diffs against live columns,
+        and ADDs missing ones. Eliminates migration chains for column additions.
+        """
+        import re
+
+        table_pattern = re.compile(
+            r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)\s*\((.*?)\);",
+            re.IGNORECASE | re.DOTALL,
+        )
+        for match in table_pattern.finditer(SCHEMA_SQL):
+            table_name = match.group(1)
+            columns_block = match.group(2)
+
+            declared_cols = {}
+            for line in columns_block.split("\n"):
+                line = line.strip().rstrip(",")
+                if not line or line.startswith("--"):
+                    continue
+                parts = line.split()
+                if len(parts) >= 2:
+                    col_name = parts[0].strip('"')
+                    col_type = parts[1].upper()
+                    if col_name.upper() in (
+                        "PRIMARY", "UNIQUE", "CHECK", "FOREIGN", "CONSTRAINT",
+                    ):
+                        continue
+                    declared_cols[col_name] = col_type
+
+            cursor = await self._conn.execute(f"PRAGMA table_info({table_name})")
+            live_rows = await cursor.fetchall()
+            live_cols = {row[1] for row in live_rows}
+
+            for col_name, col_type in declared_cols.items():
+                if col_name not in live_cols:
+                    await self._conn.execute(
+                        f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type}"
+                    )
+
+        await self._conn.commit()
 
     # ---- helpers ----------------------------------------------------------
 

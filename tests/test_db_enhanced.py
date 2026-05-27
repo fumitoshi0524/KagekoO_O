@@ -133,3 +133,42 @@ async def test_save_memory_fts_integration():
         assert results[0]["id"] is not None
         assert "数据库集群" in results[0]["content"]
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_schema_reconciliation_adds_column():
+    """_reconcile_columns should add missing columns without migration."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        db = KagekoDB(str(db_path))
+        await db.init()
+
+        # Drop the title column to simulate old schema
+        await db._conn.execute("CREATE TABLE _sessions_old AS SELECT id, platform, chat_id FROM sessions")
+        await db._conn.execute("DROP TABLE sessions")
+        await db._conn.execute(
+            "CREATE TABLE sessions (id TEXT PRIMARY KEY, platform TEXT NOT NULL, chat_id TEXT NOT NULL)"
+        )
+        await db._conn.execute("INSERT INTO sessions SELECT id, platform, chat_id FROM _sessions_old")
+        await db._conn.execute("DROP TABLE _sessions_old")
+        await db._conn.commit()
+
+        await db._reconcile_columns()
+
+        cursor = await db._conn.execute("PRAGMA table_info(sessions)")
+        columns = {row[1] for row in await cursor.fetchall()}
+        assert "title" in columns
+        assert "created_at" in columns
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_schema_reconciliation_idempotent():
+    """Running reconcile twice should not error."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        db = KagekoDB(str(db_path))
+        await db.init()
+        await db._reconcile_columns()
+        await db._reconcile_columns()  # second run should be no-op
+        await db.close()
