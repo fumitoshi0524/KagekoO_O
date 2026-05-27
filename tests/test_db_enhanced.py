@@ -92,8 +92,9 @@ async def test_fts5_cjk_search():
             "INSERT INTO memory (id, content, tags, source, session_id) VALUES (?, ?, ?, ?, ?)",
             ("mem-2", "部署了nginx到生产服务器", "运维", "conversation", "s1"),
         )
-        results = await db.search_memory("nginx")
+        results = await db.search_memory("部署了")
         assert len(results) >= 1
+        assert results[0]["id"] == "mem-2"
         await db.close()
 
 
@@ -111,4 +112,24 @@ async def test_fts5_sync_on_insert():
         )
         results = await db.search_memory("authentication")
         assert len(results) >= 1
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_save_memory_fts_integration():
+    """save_memory() + search_memory() should work end-to-end including trigger sync."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        db = KagekoDB(str(db_path))
+        await db.init()
+        await db.save_memory(
+            content="部署了新的数据库集群到生产环境",
+            tags="运维,部署",
+            source="conversation",
+            session_id="s3",
+        )
+        results = await db.search_memory("部署")
+        assert len(results) >= 1
+        assert results[0]["id"] is not None
+        assert "数据库集群" in results[0]["content"]
         await db.close()

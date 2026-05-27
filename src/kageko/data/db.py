@@ -182,6 +182,7 @@ class KagekoDB:
         await self._migrate_session_title()
         await self._migrate_session_summary()
         await self._rebuild_sessions_fts()
+        await self._rebuild_memory_table()
         await self._create_fts_indexes()
 
     async def close(self) -> None:
@@ -313,6 +314,44 @@ class KagekoDB:
         if "summary" not in columns:
             await self._conn.execute("ALTER TABLE sessions ADD COLUMN summary TEXT NOT NULL DEFAULT ''")
             await self._conn.commit()
+
+    async def _rebuild_memory_table(self) -> None:
+        """Migrate memory table if it has INTEGER id (old schema) instead of TEXT."""
+        cursor = await self._conn.execute("PRAGMA table_info(memory)")
+        columns = await cursor.fetchall()
+        id_col = next((c for c in columns if c[1] == "id"), None)
+        if id_col is None:
+            return
+        # type 1 = INTEGER, type 12 or text-like = TEXT
+        if id_col[2].upper() == "INTEGER":
+            await self._conn.executescript("""
+                ALTER TABLE memory RENAME TO _memory_old;
+            """)
+            await self._conn.executescript("""
+                CREATE TABLE memory (
+                    id          TEXT PRIMARY KEY,
+                    content     TEXT NOT NULL DEFAULT '',
+                    tags        TEXT NOT NULL DEFAULT '',
+                    source      TEXT NOT NULL DEFAULT '',
+                    session_id  TEXT NOT NULL DEFAULT '',
+                    created_at  TEXT NOT NULL DEFAULT ''
+                );
+            """)
+            await self._conn.execute(
+                "INSERT INTO memory (id, content, tags, source, session_id, created_at) "
+                "SELECT CAST(id AS TEXT), COALESCE(key, '') || ' ' || COALESCE(value, ''), "
+                "COALESCE(tags, ''), COALESCE(source, ''), COALESCE(session_id, ''), "
+                "COALESCE(created_at, '') FROM _memory_old"
+            )
+            await self._conn.executescript("DROP TABLE IF EXISTS _memory_old;")
+            await self._conn.commit()
+
+        # Drop old FTS tables so they get recreated cleanly
+        await self._conn.executescript("""
+            DROP TABLE IF EXISTS memory_fts;
+            DROP TABLE IF EXISTS memory_fts_trgm;
+        """)
+        await self._conn.commit()
 
     async def _rebuild_sessions_fts(self) -> None:
         """Drop and recreate sessions_fts to pick up schema changes (e.g. summary column)."""
