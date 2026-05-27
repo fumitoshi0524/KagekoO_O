@@ -87,8 +87,15 @@ SCHEMA_SQL = """
         chat_id     TEXT NOT NULL,
         created_at  TEXT NOT NULL,
         metadata    TEXT NOT NULL DEFAULT '{}',
-        summary     TEXT NOT NULL DEFAULT '',
-        title       TEXT NOT NULL DEFAULT ''
+        summary            TEXT NOT NULL DEFAULT '',
+        title              TEXT NOT NULL DEFAULT '',
+        input_tokens       INTEGER DEFAULT 0,
+        output_tokens      INTEGER DEFAULT 0,
+        cache_read_tokens  INTEGER DEFAULT 0,
+        cache_write_tokens INTEGER DEFAULT 0,
+        reasoning_tokens   INTEGER DEFAULT 0,
+        estimated_cost_usd REAL DEFAULT 0,
+        actual_cost_usd    REAL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS messages (
@@ -498,6 +505,33 @@ class KagekoDB:
             "UPDATE sessions SET summary=? WHERE id=?", (summary, session_id)
         )
         await self._conn.commit()
+
+    async def update_session_tokens(
+        self,
+        session_id: str,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
+        reasoning_tokens: int = 0,
+        estimated_cost_usd: float = 0.0,
+    ) -> None:
+        """Increment token counters for a session."""
+        await self.write_with_retry(
+            "UPDATE sessions SET "
+            "input_tokens = input_tokens + ?, "
+            "output_tokens = output_tokens + ?, "
+            "cache_read_tokens = cache_read_tokens + ?, "
+            "cache_write_tokens = cache_write_tokens + ?, "
+            "reasoning_tokens = reasoning_tokens + ?, "
+            "estimated_cost_usd = estimated_cost_usd + ? "
+            "WHERE id = ?",
+            (
+                input_tokens, output_tokens, cache_read_tokens,
+                cache_write_tokens, reasoning_tokens,
+                estimated_cost_usd, session_id,
+            ),
+        )
 
     async def get_session(self, session_id: str) -> SessionRecord | None:
         cursor = await self._conn.execute(

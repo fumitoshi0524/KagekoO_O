@@ -163,6 +163,49 @@ async def test_schema_reconciliation_adds_column():
 
 
 @pytest.mark.asyncio
+async def test_token_tracking_columns():
+    """Sessions table should have token tracking columns."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        db = KagekoDB(str(db_path))
+        await db.init()
+        cursor = await db._conn.execute("PRAGMA table_info(sessions)")
+        columns = {row[1] for row in await cursor.fetchall()}
+        assert "input_tokens" in columns
+        assert "output_tokens" in columns
+        assert "cache_read_tokens" in columns
+        assert "cache_write_tokens" in columns
+        assert "reasoning_tokens" in columns
+        assert "estimated_cost_usd" in columns
+        assert "actual_cost_usd" in columns
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_update_token_counts():
+    """update_session_tokens should increment counters."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        db = KagekoDB(str(db_path))
+        await db.init()
+        try:
+            await db.write_with_retry(
+                "INSERT INTO sessions (id, platform, chat_id, created_at) VALUES (?, ?, ?, ?)",
+                ("s1", "cli", "local", "2025-01-01T00:00:00"),
+            )
+            await db.update_session_tokens("s1", input_tokens=100, output_tokens=50)
+            await db.update_session_tokens("s1", input_tokens=200, output_tokens=75)
+            cursor = await db._conn.execute(
+                "SELECT input_tokens, output_tokens FROM sessions WHERE id = ?", ("s1",)
+            )
+            row = await cursor.fetchone()
+            assert row[0] == 300  # 100 + 200
+            assert row[1] == 125  # 50 + 75
+        finally:
+            await db.close()
+
+
+@pytest.mark.asyncio
 async def test_schema_reconciliation_idempotent():
     """Running reconcile twice should not error."""
     with tempfile.TemporaryDirectory() as tmpdir:
