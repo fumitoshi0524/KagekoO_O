@@ -113,12 +113,12 @@ KagekoO_O/
 
 ## Acknowledgements
 
-Kageko's design draws inspiration from prior work in agent architecture and tool-use:
+Kageko's design draws from:
 
-- **Hermes** — agent framework with multi-platform gateway and persistent learning loop
-- **OMP (Open Modular Platform)** — modular agent composition and cross-provider model routing
-- **Unitool Call** — unified tool-calling protocol across heterogeneous LLM backends
+- [Hermes](https://github.com/NousResearch/hermes-agent) — multi-platform agent framework with persistent learning loop
+- [oh-my-pi (omp)](https://github.com/can1357/oh-my-pi) — hash-anchored edits, optimized tool harness, multi-agent sub-agents
+- [UniToolCall](https://github.com/EIT-NLP/UniToolCall) — unified tool-calling protocol across heterogeneous LLM backends
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for full text.
+[MIT](LICENSE)

@@ -116,10 +116,10 @@ KagekoO_O/
 
 Kageko 的设计汲取了以下工作的灵感：
 
-- **Hermes** — 具备多平台网关和持久学习循环的智能体框架
-- **OMP (Open Modular Platform)** — 模块化智能体组合与跨提供商模型路由
-- **Unitool Call** — 面向异构 LLM 后端的统一工具调用协议
+- [Hermes](https://github.com/NousResearch/hermes-agent) — 多平台智能体框架，具备持久学习循环
+- [oh-my-pi (omp)](https://github.com/can1357/oh-my-pi) — hash 锚点编辑、优化工具链、多智能体子代理
+- [UniToolCall](https://github.com/EIT-NLP/UniToolCall) — 面向异构 LLM 后端的统一工具调用协议
 
 ## 许可证
 
-MIT — 全文见 [LICENSE](LICENSE)
+[MIT](LICENSE)
