@@ -34,7 +34,7 @@ class RuleEngine:
     ]
 
     def check(self, tool_call: ToolCall) -> Decision | None:
-        if tool_call.name == "bash":
+        if tool_call.name in ("bash", "native_shell"):
             command = tool_call.args.get("command", "")
             for pattern in self.DANGEROUS_PATTERNS:
                 if pattern.search(command):
@@ -60,6 +60,7 @@ class PermissionPipeline:
         self.sandbox_enabled = sandbox_enabled
         self.prompt_fn = prompt_fn
         self.rule_engine = RuleEngine()
+        self._session_allow_all: set[str] = set()
 
     async def check(self, tool_call: ToolCall) -> Decision:
         # Layer 1: Rule engine
@@ -74,14 +75,31 @@ class PermissionPipeline:
         if decision := self._check_mode(tool_call):
             return decision
 
+        # Layer 3.5: Session-wide "always allow" cache
+        if tool_call.name in self._session_allow_all:
+            return Decision.ALLOW
+
         # Layer 4: Interactive prompt
         if self.prompt_fn:
-            return await self.prompt_fn(tool_call)
+            decision = await self.prompt_fn(tool_call)
+            if decision == Decision.ALLOW and self._is_always_decision(decision):
+                pass  # handled by the prompt function
+            return decision
+        if self.mode == SecurityMode.INTERACTIVE:
+            raise PermissionError("Interactive mode requires a prompt function")
         return Decision.ALLOW
+
+    def _is_always_decision(self, decision: Decision) -> bool:
+        """Override point — actual always-tracking is done by the prompt function."""
+        return False
+
+    def allow_always(self, tool_name: str) -> None:
+        """Mark a tool as always-allowed for the rest of the session."""
+        self._session_allow_all.add(tool_name)
 
     def _check_mode(self, tool_call: ToolCall) -> Decision | None:
         if self.mode == SecurityMode.READ_ONLY:
-            write_tools = {"file_write", "file_edit", "bash", "eval"}
+            write_tools = {"file_write", "hashline_edit", "bash", "eval", "native_shell"}
             if tool_call.name in write_tools:
                 return Decision.DENY
         return None

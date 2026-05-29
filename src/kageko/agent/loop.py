@@ -54,7 +54,7 @@ class AgentEngine:
             self.llm = llm or LLMAdapter(config.model, config.api_key, config.base_url)
             self.max_turns = config.max_turns
             self.system_prompt = config.system_prompt
-            self.context_window_size = config.context_window_size
+            self.context_window_size = config.get_context_window_size()
         else:
             # Legacy path
             self.config = AgentConfig(
@@ -79,6 +79,7 @@ class AgentEngine:
         # TTSR interceptor
         from kageko.agent.ttsr import StreamInterceptor
         self.stream_interceptor = StreamInterceptor(rules=ttsr_rules) if ttsr_rules else None
+        self.last_tokens: int = 0
 
         # If no compressor was injected, create one from the budget
         if self.compressor is None and self.memory is not None:
@@ -89,12 +90,44 @@ class AgentEngine:
         from kageko.tools.builtin import register_all
         register_all(self.registry)
 
+    async def _check_tool_allowed(self, tc: ToolCall) -> str | None:
+        """Check guardrails and permissions for a tool call.
+
+        Returns an error message string if the tool should be blocked,
+        or None if execution should proceed.
+        """
+        # Guardrails check
+        if self.guardrails:
+            from kageko.agent.guardrails import ToolCallSignature
+            sig = ToolCallSignature(tc.name, tc.args)
+            decision = self.guardrails.check(sig)
+            if decision.action == "block":
+                return decision.message
+            if decision.action == "halt":
+                return f"HALT: {decision.message}"
+
+        # Permission check
+        if self.permissions:
+            from kageko.agent.permissions import Decision
+            decision = await self.permissions.check(tc)
+            if decision == Decision.DENY:
+                return f"[DENIED] Tool '{tc.name}' blocked by security policy"
+            if decision == Decision.EXECUTE_IN_SANDBOX:
+                return "[SANDBOX ERROR] Sandbox execution is not available."
+
+        return None
+
     def _prepare_messages(self, message: str | list[Message]) -> list[Message]:
-        """Convert input to message list and prepend system prompt if configured."""
+        """Convert input to message list and prepend system prompt if configured.
+
+        When given a list, the caller's list is used directly (not copied) so
+        that tool results, assistant messages, and reasoning_content appended
+        by the agent loop are visible to the caller for subsequent turns.
+        """
         if isinstance(message, str):
-            messages = [Message(role="user", content=message)]
+            messages: list[Message] = [Message(role="user", content=message)]
         else:
-            messages = list(message)
+            messages = message
 
         # Prepend system prompt if configured and not already present
         if self.system_prompt:
@@ -104,7 +137,7 @@ class AgentEngine:
 
         return messages
 
-    async def run(self, message: str, context: "AgentContext | None" = None) -> AgentResult:
+    async def run(self, message: str | list[Message], context: "AgentContext | None" = None, mode: AgentMode = AgentMode.TOOL_USE) -> AgentResult:
         """Main agent loop with memory, compression, and guardrails integration."""
         context = context or AgentContext()
         messages = self._prepare_messages(message)
@@ -142,6 +175,7 @@ class AgentEngine:
                 role="assistant",
                 content=response.content or "",
                 tool_calls=response.tool_calls,
+                reasoning_content=response.reasoning_content,
             )
             messages.append(assistant_msg)
 
@@ -151,7 +185,7 @@ class AgentEngine:
                     try:
                         await self.memory.sync_turn(type("Turn", (), {
                             "user": message,
-                            "assistant": response.content,
+                            "assistant": response.content or "",
                         })())
                     except Exception:
                         logging.getLogger("kageko.agent.loop").debug("Memory sync failed", exc_info=True)
@@ -174,6 +208,7 @@ class AgentEngine:
                             tool_call_id=tc.id,
                             content=decision.message,
                             is_error=True,
+                            tool_name=tc.name,
                         )
                         messages.append(result.to_message())
                         continue
@@ -194,6 +229,7 @@ class AgentEngine:
                             tool_call_id=tc.id,
                             content=f"[DENIED] Tool '{tc.name}' blocked by security policy",
                             is_error=True,
+                            tool_name=tc.name,
                         )
                         messages.append(result.to_message())
                         if self.on_tool_end:
@@ -204,6 +240,7 @@ class AgentEngine:
                             tool_call_id=tc.id,
                             content="[SANDBOX ERROR] Sandbox execution is not available.",
                             is_error=True,
+                            tool_name=tc.name,
                         )
                         messages.append(result.to_message())
                         if self.on_tool_end:
@@ -215,12 +252,16 @@ class AgentEngine:
 
                 try:
                     content = await self.registry.execute(tc.name, tc.args)
-                    result = ToolResult(tool_call_id=tc.id, content=content)
+                    result = ToolResult(tool_call_id=tc.id, content=content, tool_name=tc.name)
                 except Exception as e:
+                    if self.guardrails:
+                        from kageko.agent.guardrails import ToolCallSignature
+                        self.guardrails.check(ToolCallSignature(tc.name, tc.args), failed=True)
                     result = ToolResult(
                         tool_call_id=tc.id,
                         content=f"[ERROR] {type(e).__name__}: {e}",
                         is_error=True,
+                        tool_name=tc.name,
                     )
 
                 if self.on_tool_end:
@@ -247,6 +288,7 @@ class AgentEngine:
         messages = self._prepare_messages(message)
         schemas = self.registry.schemas()
 
+        total_tokens = 0
         for _turn in range(self.max_turns):
             if self.compressor:
                 estimated = self.compressor.estimate_tokens(messages)
@@ -259,9 +301,11 @@ class AgentEngine:
                 interceptor = StreamInterceptor(rules=ttsr_rules)
                 tool_tokens: list = []
                 full_content = ""
+                reasoning_parts: list[str] = []
+                tokens_list: list[int] = []
                 correction_fired = False
 
-                text_gen = self._text_generator(token_stream, tool_tokens)
+                text_gen = self._text_generator(token_stream, tool_tokens, reasoning_parts, tokens_list)
                 async for item in interceptor.intercept(text_gen):
                     if isinstance(item, Correction):
                         yield item
@@ -271,44 +315,60 @@ class AgentEngine:
                     yield StreamToken(text=item)
 
                 if correction_fired:
+                    self.last_tokens = total_tokens + sum(tokens_list)
                     return
 
+                total_tokens += sum(tokens_list)
                 if tool_tokens:
                     tool_calls = self._reconstruct_tool_calls(tool_tokens)
                     messages.append(Message(
                         role="assistant",
                         content=full_content,
                         tool_calls=tool_calls,
+                        reasoning_content="".join(reasoning_parts) or None,
                     ))
                     for tc in tool_calls:
-                        if self.guardrails:
-                            from kageko.agent.guardrails import ToolCallSignature
-                            sig = ToolCallSignature(tc.name, tc.args)
-                            decision = self.guardrails.check(sig)
-                            if decision.action in ("block", "halt"):
-                                messages.append(Message(
-                                    role="tool",
-                                    content=decision.message,
-                                    tool_call_id=tc.id,
-                                ))
-                                continue
+                        error = await self._check_tool_allowed(tc)
+                        if error:
+                            is_halt = error.startswith("HALT:")
+                            messages.append(Message(
+                                role="tool",
+                                content=error,
+                                tool_call_id=tc.id,
+                                tool_name=tc.name,
+                            ))
+                            if is_halt:
+                                yield StreamToken(text=f"\n[STOPPED] {error}")
+                                self.last_tokens = total_tokens
+                                return
+                            continue
                         try:
                             content = await self.registry.execute(tc.name, tc.args)
-                            messages.append(Message(role="tool", content=content, tool_call_id=tc.id))
+                            messages.append(Message(role="tool", content=content, tool_call_id=tc.id, tool_name=tc.name))
                         except Exception as e:
+                            if self.guardrails:
+                                from kageko.agent.guardrails import ToolCallSignature
+                                self.guardrails.check(ToolCallSignature(tc.name, tc.args), failed=True)
                             messages.append(Message(
                                 role="tool",
                                 content=f"[ERROR] {type(e).__name__}: {e}",
                                 tool_call_id=tc.id,
+                                tool_name=tc.name,
                             ))
                     continue
 
-                messages.append(Message(role="assistant", content=full_content))
+                messages.append(Message(
+                    role="assistant",
+                    content=full_content,
+                    reasoning_content="".join(reasoning_parts) or None,
+                ))
+                self.last_tokens = total_tokens
                 return
 
             full_content = ""
             tool_tokens: list = []
             finish_reason = ""
+            reasoning_parts: list[str] = []
 
             async for tok in token_stream:
                 if tok.is_tool_call:
@@ -316,36 +376,81 @@ class AgentEngine:
                 elif tok.text:
                     full_content += tok.text
                     yield tok
+                if tok.reasoning_content:
+                    reasoning_parts.append(tok.reasoning_content)
                 if tok.finish_reason:
                     finish_reason = tok.finish_reason
+                if tok.tokens_used:
+                    total_tokens += tok.tokens_used
 
             if finish_reason == "stop" or not tool_tokens:
-                messages.append(Message(role="assistant", content=full_content))
+                messages.append(Message(
+                    role="assistant",
+                    content=full_content,
+                    reasoning_content="".join(reasoning_parts) or None,
+                ))
+                self.last_tokens = total_tokens
                 return
 
             tool_calls = self._reconstruct_tool_calls(tool_tokens)
-            messages.append(Message(role="assistant", content=full_content, tool_calls=tool_calls))
+            messages.append(Message(
+                role="assistant",
+                content=full_content,
+                tool_calls=tool_calls,
+                reasoning_content="".join(reasoning_parts) or None,
+            ))
             for tc in tool_calls:
-                try:
-                    content = await self.registry.execute(tc.name, tc.args)
-                    messages.append(Message(role="tool", content=content, tool_call_id=tc.id))
-                except Exception as e:
+                error = await self._check_tool_allowed(tc)
+                if error:
+                    is_halt = error.startswith("HALT:")
                     messages.append(Message(
                         role="tool",
-                        content=f"[ERROR] {type(e).__name__}: {e}",
+                        content=error,
                         tool_call_id=tc.id,
+                        tool_name=tc.name,
                     ))
+                    if is_halt:
+                        yield StreamToken(text=f"\n[STOPPED] {error}")
+                        self.last_tokens = total_tokens
+                        return
+                    continue
+                if self.on_tool_start:
+                    await self.on_tool_start(tc.name, tc.args)
+                tool_ok = False
+                tool_result = ""
+                try:
+                    tool_result = await self.registry.execute(tc.name, tc.args)
+                    tool_ok = True
+                    messages.append(Message(role="tool", content=tool_result, tool_call_id=tc.id, tool_name=tc.name))
+                except Exception as e:
+                    if self.guardrails:
+                        from kageko.agent.guardrails import ToolCallSignature
+                        self.guardrails.check(ToolCallSignature(tc.name, tc.args), failed=True)
+                    tool_result = f"[ERROR] {type(e).__name__}: {e}"
+                    messages.append(Message(
+                        role="tool",
+                        content=tool_result,
+                        tool_call_id=tc.id,
+                        tool_name=tc.name,
+                    ))
+                if self.on_tool_end:
+                    await self.on_tool_end(tc.name, tool_result, not tool_ok)
             continue
 
+        self.last_tokens = total_tokens
         yield StreamToken(text="(max turns reached)")
 
-    async def _text_generator(self, token_stream, tool_tokens: list) -> AsyncIterator[str]:
+    async def _text_generator(self, token_stream, tool_tokens: list, reasoning_parts: list | None = None, tokens_used: list | None = None) -> AsyncIterator[str]:
         """Extract text tokens for TTSR consumption while collecting tool call tokens."""
         async for tok in token_stream:
             if tok.is_tool_call:
                 tool_tokens.append(tok)
             elif tok.text:
                 yield tok.text
+            if reasoning_parts is not None and tok.reasoning_content:
+                reasoning_parts.append(tok.reasoning_content)
+            if tokens_used is not None and tok.tokens_used:
+                tokens_used.append(tok.tokens_used)
 
     def _reconstruct_tool_calls(self, tokens: list) -> list[ToolCall]:
         """Reconstruct tool calls from streamed tool call tokens."""
@@ -360,6 +465,8 @@ class AgentEngine:
 
         result = []
         for tc_id, data in by_id.items():
+            if not data["name"]:
+                continue  # skip phantom entries from orphan continuation chunks
             try:
                 args = json.loads(data["args_str"]) if data["args_str"] else {}
             except json.JSONDecodeError as e:

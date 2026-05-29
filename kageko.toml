@@ -1,9 +1,30 @@
+# Kageko configuration
+# Run `kageko setup` for interactive configuration, or edit this file directly.
+
 [agent]
-model = "gpt-4o"
+# Model name (provider-specific: gpt-4o, deepseek-chat, deepseek-reasoner, llama3, …)
+model = "deepseek-chat"
+# Agent mode: "tool-use" (default) or "qaoa" (research trajectory)
 mode = "tool-use"
+# Maximum tool-calling turns per query
 max_turns = 20
+# API key (can also be set via env var: KAGEKO_API_KEY or provider-specific)
+api_key = ""
+# API base URL (leave empty for provider default)
+base_url = ""
+# Context window size in tokens (0 = auto-detect from model)
+context_window_size = 0
+# Sampling temperature (ignored for deepseek-reasoner)
+temperature = 0.7
+# System prompt override
+system_prompt = ""
+# Provider name: "openai", "deepseek", "ollama", or custom
+provider = "deepseek"
 
 [security]
+# "permissive" — allow all tools without prompting
+# "read-only" — deny write tools (file_write, hashline_edit, bash, eval, native_shell)
+# "interactive" — prompt before each tool call (arrow-key menu, session memory)
 mode = "interactive"
 sandbox = false
 

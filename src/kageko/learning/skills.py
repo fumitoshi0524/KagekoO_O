@@ -96,4 +96,8 @@ class SkillEngine:
 
     async def search(self, query: str, limit: int = 5) -> list[dict]:
         """Search skills via FTS5."""
-        return await self.db.search_memory(query, limit=limit)
+        skills = await self.db.search_skills(query)
+        return [
+            {"name": s.name, "description": s.description, "trigger": s.trigger, "tags": s.tags}
+            for s in skills[:limit]
+        ]

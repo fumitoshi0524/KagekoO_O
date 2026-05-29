@@ -40,7 +40,7 @@ async def test_bash_run():
 
 @pytest.mark.asyncio
 async def test_bash_run_timeout():
-    result = await bash_run({"command": "sleep 10", "timeout": 1})
+    result = await bash_run({"command": "python -c \"import time; time.sleep(10)\"", "timeout": 1})
     assert "timeout" in result.lower() or "timed out" in result.lower()
 
 

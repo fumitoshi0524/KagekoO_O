@@ -175,11 +175,19 @@ class KagekoTUI(App):
         except Exception as e:
             chat_log.write(f"\n[red]Error: {e}[/]")
 
-        self._messages.append(Message(role="assistant", content=assistant_text or "(streamed)"))
-
-        # Persist assistant message to DB if available
-        if self.db and self.session:
-            await self.db.append_message(self.session.id, role="assistant", content=assistant_text or "(streamed)")
+        # The engine already appended the assistant message to _messages with
+        # reasoning_content, tool_calls, etc. — use that instead of a bare duplicate.
+        if self._messages and self._messages[-1].role == "assistant":
+            last = self._messages[-1]
+            if self.db and self.session:
+                await self.db.append_message(
+                    self.session.id, role="assistant", content=last.content,
+                    reasoning_content=last.reasoning_content or "",
+                )
+        else:
+            self._messages.append(Message(role="assistant", content=assistant_text or "(streamed)"))
+            if self.db and self.session:
+                await self.db.append_message(self.session.id, role="assistant", content=assistant_text or "(streamed)")
 
         self.status_text = "Ready"
 

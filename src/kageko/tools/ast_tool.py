@@ -30,4 +30,4 @@ AST_SUMMARIZE_TOOL = {
 
 
 async def ast_summarize_handler(args: dict) -> str:
-    return ast_summarize(args["source"], args.get("language", "python"))
+    return ast_summarize(args.get("source", ""), args.get("language", "python"))

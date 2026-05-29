@@ -4,15 +4,20 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from kageko.tools.sandbox import get_workspace_root
+
 
 async def bash_run(args: dict[str, Any]) -> str:
-    command = args["command"]
+    command = args.get("command")
+    if not command:
+        return "[ERROR] Missing required parameter: 'command'"
     timeout = args.get("timeout", 30)
     try:
         proc = await asyncio.create_subprocess_shell(
             command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            cwd=str(get_workspace_root()),
         )
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
@@ -62,7 +67,9 @@ async def native_shell_handler(args: dict) -> str:
         if _shell_instance is None:
             _shell_instance = NativeShell()
 
-    command = args["command"]
+    command = args.get("command")
+    if not command:
+        return "[ERROR] Missing required parameter: 'command'"
     try:
         result = _shell_instance.exec(command)
         return result

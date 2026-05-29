@@ -19,13 +19,16 @@ class Message:
     tool_call_id: str | None = None
     tool_name: str | None = None
     images: list[dict[str, Any]] | None = None
+    reasoning_content: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"role": self.role, "content": self.content}
         if self.tool_calls:
             d["tool_calls"] = [tc.to_dict() for tc in self.tool_calls]
-        if self.tool_call_id:
+        if self.tool_call_id is not None:
             d["tool_call_id"] = self.tool_call_id
+        if self.reasoning_content is not None:
+            d["reasoning_content"] = self.reasoning_content
         return d
 
 
@@ -36,10 +39,11 @@ class ToolCall:
     args: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
+        import json as _json
         return {
             "id": self.id,
             "type": "function",
-            "function": {"name": self.name, "arguments": self.args},
+            "function": {"name": self.name, "arguments": _json.dumps(self.args)},
         }
 
 
@@ -48,12 +52,14 @@ class ToolResult:
     tool_call_id: str
     content: str
     is_error: bool = False
+    tool_name: str | None = None
 
     def to_message(self) -> Message:
         return Message(
             role="tool",
             content=self.content,
             tool_call_id=self.tool_call_id,
+            tool_name=self.tool_name,
         )
 
 
@@ -66,6 +72,8 @@ class StreamToken:
     tool_args: str = ""
     tool_call_id: str = ""
     finish_reason: str = ""  # "stop", "tool_calls", ""
+    reasoning_content: str = ""  # non-empty when model streams thinking/reasoning tokens
+    tokens_used: int = 0  # set on the final token when usage info is available
 
 
 @dataclass

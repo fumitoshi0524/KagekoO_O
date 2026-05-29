@@ -42,6 +42,7 @@ class MessageRecord:
     role: str
     content: str
     created_at: str
+    reasoning_content: str = ""
 
 
 @dataclass
@@ -103,6 +104,7 @@ SCHEMA_SQL = """
         session_id  TEXT NOT NULL REFERENCES sessions(id),
         role        TEXT NOT NULL,
         content     TEXT NOT NULL,
+        reasoning_content TEXT NOT NULL DEFAULT '',
         created_at  TEXT NOT NULL
     );
 
@@ -262,6 +264,7 @@ class KagekoDB:
         await self._rebuild_sessions_fts()
         await self._rebuild_memory_table()
         await self._create_fts_indexes()
+        await self._repopulate_fts()
         await self._reconcile_columns()
 
     async def close(self) -> None:
@@ -353,21 +356,21 @@ class KagekoDB:
                     created_at  TEXT NOT NULL DEFAULT ''
                 );
             """)
+            # Old schema columns: id(INTEGER), key, value, source, created_at
+            # New columns (tags, session_id) default to empty string
             await self._conn.execute(
                 "INSERT INTO memory (id, content, tags, source, session_id, created_at) "
                 "SELECT CAST(id AS TEXT), COALESCE(key, '') || ' ' || COALESCE(value, ''), "
-                "COALESCE(tags, ''), COALESCE(source, ''), COALESCE(session_id, ''), "
+                "'', COALESCE(source, ''), '', "
                 "COALESCE(created_at, '') FROM _memory_old"
             )
             await self._conn.executescript("DROP TABLE IF EXISTS _memory_old;")
+            # Drop and recreate FTS tables since the backing data migrated
+            await self._conn.executescript("""
+                DROP TABLE IF EXISTS memory_fts;
+                DROP TABLE IF EXISTS memory_fts_trgm;
+            """)
             await self._conn.commit()
-
-        # Drop old FTS tables so they get recreated cleanly
-        await self._conn.executescript("""
-            DROP TABLE IF EXISTS memory_fts;
-            DROP TABLE IF EXISTS memory_fts_trgm;
-        """)
-        await self._conn.commit()
 
     async def _rebuild_sessions_fts(self) -> None:
         """Drop and recreate sessions_fts to pick up schema changes (e.g. summary column)."""
@@ -382,6 +385,29 @@ class KagekoDB:
     async def _create_fts_indexes(self) -> None:
         """Create FTS5 virtual tables and triggers."""
         await self._conn.executescript(FTS_SQL)
+
+    async def _repopulate_fts(self) -> None:
+        """Ensure all FTS indexes are fully populated from backing tables.
+
+        This repairs FTS state after an unclean restart or migration where
+        FTS virtual tables were recreated but existing rows were not indexed.
+        """
+        # Repopulate memory_fts (unicode61) — only rows missing from FTS
+        await self._conn.execute(
+            "INSERT OR IGNORE INTO memory_fts(rowid, content, tags, source) "
+            "SELECT m.rowid, m.content, m.tags, m.source FROM memory m"
+        )
+        # Repopulate memory_fts_trgm — only rows missing from FTS
+        await self._conn.execute(
+            "INSERT OR IGNORE INTO memory_fts_trgm(rowid, content) "
+            "SELECT m.rowid, m.content FROM memory m"
+        )
+        # Repopulate sessions_fts — only rows missing from FTS
+        await self._conn.execute(
+            "INSERT OR IGNORE INTO sessions_fts(rowid, title, summary, platform) "
+            "SELECT s.rowid, s.title, s.summary, s.platform FROM sessions s"
+        )
+        await self._conn.commit()
 
     async def _reconcile_columns(self) -> None:
         """Declarative schema reconciliation.
@@ -557,14 +583,14 @@ class KagekoDB:
 
     # ---- messages ---------------------------------------------------------
 
-    async def append_message(self, session_id: str, role: str, content: str) -> MessageRecord:
+    async def append_message(self, session_id: str, role: str, content: str, reasoning_content: str = "") -> MessageRecord:
         now = _now()
         cursor = await self._conn.execute(
-            "INSERT INTO messages (session_id, role, content, created_at) VALUES (?,?,?,?)",
-            (session_id, role, content, now),
+            "INSERT INTO messages (session_id, role, content, reasoning_content, created_at) VALUES (?,?,?,?,?)",
+            (session_id, role, content, reasoning_content, now),
         )
         await self._conn.commit()
-        return MessageRecord(id=cursor.lastrowid, session_id=session_id, role=role, content=content, created_at=now)
+        return MessageRecord(id=cursor.lastrowid, session_id=session_id, role=role, content=content, created_at=now, reasoning_content=reasoning_content)
 
     async def get_messages(self, session_id: str) -> list[MessageRecord]:
         cursor = await self._conn.execute(
@@ -578,6 +604,7 @@ class KagekoDB:
                 role=r["role"],
                 content=r["content"],
                 created_at=r["created_at"],
+                reasoning_content=(r["reasoning_content"] or "") if "reasoning_content" in r.keys() else "",
             )
             for r in rows
         ]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from kageko._native import ripgrep as _ripgrep
+from kageko.tools.sandbox import resolve_path, SandboxViolation
 
 
 def grep(pattern: str, path: str, max_results: int = 100) -> str:
@@ -31,4 +32,12 @@ GREP_TOOL = {
 
 
 async def grep_handler(args: dict) -> str:
-    return grep(args["pattern"], args["path"], args.get("max_results", 100))
+    pattern = args.get("pattern", "")
+    raw_path = args.get("path", "")
+    if not raw_path:
+        return "[ERROR] Missing required parameter: 'path'"
+    try:
+        safe_path = str(resolve_path(raw_path))
+    except SandboxViolation as e:
+        return f"[SANDBOX] {e}"
+    return grep(pattern, safe_path, args.get("max_results", 100))

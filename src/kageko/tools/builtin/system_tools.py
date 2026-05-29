@@ -13,7 +13,9 @@ async def echo(args: dict[str, Any]) -> str:
 
 
 async def todo_add(args: dict[str, Any]) -> str:
-    task = args["task"]
+    task = args.get("task")
+    if not task:
+        return "[ERROR] Missing required parameter: 'task'"
     priority = args.get("priority", "medium")
     _todos.append({"task": task, "priority": priority, "done": False})
     return f"Added: [{priority}] {task}"

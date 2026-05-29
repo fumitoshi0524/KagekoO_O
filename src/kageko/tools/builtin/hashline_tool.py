@@ -40,7 +40,9 @@ HASHLINE_TOOL: dict[str, Any] = {
 
 async def hashline_edit(args: dict[str, Any]) -> str:
     """Apply hashline edits to source code."""
-    source = args["source"]
+    source = args.get("source")
+    if not source:
+        return "[ERROR] Missing required parameter: 'source'"
     single_edit = args.get("edit")
     batch_edits = args.get("edits")
 
@@ -88,10 +90,12 @@ HASHLINE_SCHEMA = {
 
 def register(registry: ToolRegistry) -> None:
     """Register hashline_edit tool in the registry."""
+    if "hashline_edit" in registry.list_names():
+        return
     registry.register(Tool(
-        name="hashline_edit",
-        description=HASHLINE_SCHEMA["description"],
-        parameters=HASHLINE_SCHEMA["parameters"],
+        name=HASHLINE_TOOL["name"],
+        description=HASHLINE_TOOL["description"],
+        parameters=HASHLINE_TOOL["parameters"],
         handler=hashline_edit,
-        category="code",
+        category=HASHLINE_TOOL.get("category", "code"),
     ))

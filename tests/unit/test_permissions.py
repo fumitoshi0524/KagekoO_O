@@ -54,3 +54,20 @@ async def test_full_pipeline_deny_dangerous(pipeline):
     tc = ToolCall(id="1", name="bash", args={"command": "rm -rf /"})
     decision = await pipeline.check(tc)
     assert decision == Decision.DENY
+
+
+@pytest.mark.asyncio
+async def test_interactive_mode_requires_prompt_fn():
+    pipeline = PermissionPipeline(mode=SecurityMode.INTERACTIVE)
+    tc = ToolCall(id="1", name="bash", args={"command": "ls"})
+    with pytest.raises(PermissionError):
+        await pipeline.check(tc)
+
+
+@pytest.mark.asyncio
+async def test_interactive_prompt_fn_called():
+    async def deny_fn(tc): return Decision.DENY
+    pipeline = PermissionPipeline(mode=SecurityMode.INTERACTIVE, prompt_fn=deny_fn)
+    tc = ToolCall(id="1", name="bash", args={"command": "ls"})
+    decision = await pipeline.check(tc)
+    assert decision == Decision.DENY

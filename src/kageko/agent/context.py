@@ -39,6 +39,8 @@ class ContextCompressor:
         total = 0
         for msg in messages:
             total += len(msg.content) // 4
+            if msg.reasoning_content:
+                total += len(msg.reasoning_content) // 4
             if msg.tool_calls:
                 for tc in msg.tool_calls:
                     total += len(json.dumps(tc.args)) // 4
@@ -102,7 +104,7 @@ class ContextCompressor:
         """Layer 1: Replace old tool results with meaningful summaries."""
         result = []
         for msg in messages:
-            if msg.role == "tool" and msg.tool_call_id:
+            if msg.role == "tool" and msg.tool_call_id is not None:
                 summary = self.memory.summarize_tool_result(
                     msg.tool_name or "unknown", msg.content,
                 )
@@ -124,6 +126,7 @@ class ContextCompressor:
                     content=msg.content + "\n[image removed during compression]",
                     tool_calls=msg.tool_calls,
                     tool_call_id=msg.tool_call_id, tool_name=msg.tool_name,
+                    reasoning_content=msg.reasoning_content,
                 ))
             else:
                 result.append(msg)
