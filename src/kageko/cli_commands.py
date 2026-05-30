@@ -123,6 +123,7 @@ class SlashCommands:
         session: Any = None,
         tool_registry: Any = None,
         config: Any = None,
+        engine: Any = None,
     ) -> None:
         self.console = console
         self.messages = messages
@@ -131,6 +132,7 @@ class SlashCommands:
         self.session = session
         self.tool_registry = tool_registry
         self.config = config
+        self.engine = engine  # AgentEngine reference for hot-reload
         self.memory = None  # will be set by cli.py if available
 
         self._commands: dict[str, Any] = {
@@ -143,9 +145,16 @@ class SlashCommands:
             "/model": self._model,
             "/undo": self._undo,
             "/retry": self._retry,
-            "/resume": self._resume,
             "/config": self._config,
             "/search": self._search,
+            "/memory": self._memory_cmd,
+            "/skills-list": self._skills_list,
+            "/tools-generated": self._tools_generated_cmd,
+            "/evolution-stats": self._evolution_stats,
+            "/qaoa-generate": self._qaoa_generate,
+            "/qaoa-trajectories": self._qaoa_trajectories,
+            "/nudge-now": self._nudge_now,
+            "/skill-extract": self._skill_extract,
         }
 
     # ---- public API -------------------------------------------------------
@@ -207,6 +216,16 @@ class SlashCommands:
             ],
             "Info": [
                 ("/config", "Show current configuration"),
+            ],
+            "Evolution & QAOA": [
+                ("/memory [N]", "Show recent memory entries (FTS5 recall)"),
+                ("/nudge-now", "Force immediate fact extraction (skip N-turn wait)"),
+                ("/skill-extract", "Extract a reusable skill from recent conversation"),
+                ("/skills-list", "List all extracted skills by state (active/stale/archived)"),
+                ("/tools-generated", "List LLM-generated tools from QAOA patterns"),
+                ("/evolution-stats", "Overview: memory/skills/tools/trajectories/curator counts"),
+                ("/qaoa-generate", "Manually trigger tool generation from QAOA trajectories"),
+                ("/qaoa-trajectories", "Show recent QAOA trajectory records"),
             ],
         }
 
@@ -342,6 +361,9 @@ class SlashCommands:
             setattr(obj, field_info["key"], coerced)
 
             path = save_config(self.config)
+            # Notify engine so running agent picks up new max_turns / context_window_size etc.
+            if self.engine:
+                self.engine.reload_config()
             self.console.print(f"  [green]Updated {field_info['section']}.{field_info['key']} = {coerced}[/]")
             self.console.print(f"  [dim]Saved to {path}[/]\n")
 
@@ -483,6 +505,307 @@ class SlashCommands:
             self.console.print(f"\n[dim]Showing {shown} of {total} results[/]")
         else:
             self.console.print(f"\n[dim]{total} results[/]")
+
+    # ---- evolution / QAOA commands ---------------------------------------
+
+    def _memory_cmd(self, args: str) -> None:
+        """Show recent memories stored in the database."""
+        if not self.db:
+            self.console.print("[dim]No database available.[/]")
+            return
+
+        limit = 20
+        if args.strip():
+            try:
+                limit = int(args.strip())
+            except ValueError:
+                self.console.print("[red]Usage: /memory [N][/]")
+                return
+
+        import asyncio
+
+        async def _run():
+            memories = await self.db.list_memory(limit=limit)
+            if not memories:
+                self.console.print("[dim]No memories stored yet.[/]")
+                return
+
+            table = Table(title=f"Memory ({min(limit, len(memories))} entries)")
+            table.add_column("Content", style="cyan", max_width=50)
+            table.add_column("Source", style="magenta", max_width=15)
+            table.add_column("Tags", style="dim", max_width=20)
+            table.add_column("Created", style="dim")
+
+            for m in memories:
+                content = (m.content or "")[:50]
+                source = (m.source or "")[:15]
+                tags = (m.tags or "")[:20]
+                created = (m.created_at or "")[:19]
+                table.add_row(content, source, tags, created)
+
+            self.console.print(table)
+            self.console.print(f"\n[dim]Total: {await self.db.get_memory_count()} memories[/]")
+
+        self._run_async(_run())
+
+    def _skills_list(self, _args: str) -> None:
+        """List extracted skills grouped by state."""
+        if not self.db:
+            self.console.print("[dim]No database available.[/]")
+            return
+
+        async def _run():
+            skills = await self.db.get_skills_all()
+            if not skills:
+                self.console.print("[dim]No skills extracted yet.[/]")
+                return
+
+            table = Table(title=f"Skills ({len(skills)} total)")
+            table.add_column("Name", style="cyan bold")
+            table.add_column("Version", style="dim")
+            table.add_column("Description", max_width=40)
+            table.add_column("State", style="magenta")
+            table.add_column("Updated", style="dim")
+
+            for s in skills:
+                state_attr = getattr(s, "state", "active")
+                updated = getattr(s, "updated_at", getattr(s, "created_at", ""))[:19]
+                table.add_row(
+                    s.name, s.version, (s.description or "")[:40],
+                    state_attr, updated,
+                )
+
+            self.console.print(table)
+
+        self._run_async(_run())
+
+    def _tools_generated_cmd(self, _args: str) -> None:
+        """List LLM-generated tools."""
+        if not self.db:
+            self.console.print("[dim]No database available.[/]")
+            return
+
+        async def _run():
+            tools = await self.db.get_tools_generated()
+            if not tools:
+                self.console.print("[dim]No tools generated yet.[/]")
+                self.console.print("[dim]Run /qaoa-generate to trigger tool generation from QAOA trajectories.[/]")
+                return
+
+            table = Table(title=f"Generated Tools ({len(tools)})")
+            table.add_column("Name", style="cyan bold")
+            table.add_column("Description", max_width=50)
+            table.add_column("Enabled", style="magenta")
+            table.add_column("Created", style="dim")
+
+            for t in tools:
+                enabled = "✓" if t.get("enabled") else "✗"
+                created = (t.get("created_at") or "")[:19]
+                table.add_row(
+                    t.get("name", "?"), (t.get("description") or "")[:50],
+                    enabled, created,
+                )
+
+            self.console.print(table)
+
+        self._run_async(_run())
+
+    def _evolution_stats(self, _args: str) -> None:
+        """Show overall learning/evolution statistics."""
+        if not self.db:
+            self.console.print("[dim]No database available.[/]")
+            return
+
+        async def _run():
+            mem_count = await self.db.get_memory_count()
+            skills_count = await self.db.get_skills_count()
+            tools_count = await self.db.get_tools_count()
+            traj_count = await self.db.get_trajectory_count()
+            curator_count = await self.db.get_curator_log_count()
+
+            table = Table(title="Evolution Stats")
+            table.add_column("Metric", style="bold cyan")
+            table.add_column("Count", style="green", justify="right")
+
+            table.add_row("Memories", str(mem_count))
+            table.add_row("Skills", str(skills_count))
+            table.add_row("Tools (generated)", str(tools_count))
+            table.add_row("QAOA Trajectories", str(traj_count))
+            table.add_row("Curator Actions", str(curator_count))
+
+            self.console.print(table)
+
+            # Show last few curator actions
+            if curator_count > 0:
+                self.console.print("\n[bold]Recent Curator Actions:[/]")
+                actions = await self.db.get_curator_log(limit=5)
+                for a in actions:
+                    action = a.get("action", "?")
+                    detail = a.get("detail", "")
+                    created = (a.get("created_at") or "")[:19]
+                    self.console.print(f"  [dim]{created}[/] [{a.get('action','?')}] {detail}")
+
+        self._run_async(_run())
+
+    def _qaoa_generate(self, _args: str) -> None:
+        """Manually trigger QAOA tool generation from recent trajectories."""
+        if not self.db:
+            self.console.print("[dim]No database available.[/]")
+            return
+
+        from kageko.learning.tools import ToolGenerator
+        from kageko.learning.curator import Curator
+
+        async def _run():
+            # Need LLM for generation
+            if not self.config:
+                self.console.print("[dim]No config — cannot create LLM client.[/]")
+                return
+
+            from kageko.llm import LLMAdapter
+            from kageko.llm.providers import resolve_provider
+
+            provider = resolve_provider(self.config.agent.provider) if self.config.agent.provider else None
+            llm = LLMAdapter(
+                model=self.config.agent.model,
+                api_key=self.config.agent.api_key,
+                base_url=self.config.agent.base_url,
+                temperature=self.config.agent.temperature,
+                provider=provider,
+            )
+
+            curator = Curator(self.db)
+            gen = ToolGenerator(db=self.db, llm=llm, registry=self.tool_registry, curator=curator)
+
+            self.console.print("[dim]Analyzing recent QAOA trajectories...[/]")
+            result = await gen.analyze_and_generate()
+
+            if result:
+                self.console.print(f"[green]Generated tool: [bold]{result['name']}[/][/]")
+                self.console.print(f"  Description: {result.get('description', '')}")
+                self.console.print(f"  Category: {result.get('category', 'utility')}")
+            else:
+                self.console.print("[dim]No repeated patterns found (need >=3 identical tool calls in recent trajectories).[/]")
+
+        self._run_async(_run())
+
+    def _nudge_now(self, _args: str) -> None:
+        """Force immediate memory fact extraction (bypasses the N-turn threshold)."""
+        if not self.engine or not self.engine.memory:
+            self.console.print("[dim]No memory manager available.[/]")
+            return
+        if not self.messages:
+            self.console.print("[dim]No conversation to review.[/]")
+            return
+
+        async def _run():
+            self.console.print("[dim]Extracting facts from recent conversation...[/]")
+            entries = await self.engine.memory.run_review(self.messages, self.engine.llm)
+            if entries:
+                self.console.print(f"[green]Extracted {len(entries)} facts:[/]")
+                for e in entries:
+                    self.console.print(f"  • {e.content}")
+            else:
+                self.console.print("[dim]Nothing worth saving this time.[/]")
+
+        self._run_async(_run())
+
+    def _skill_extract(self, _args: str) -> None:
+        """Extract a reusable skill from the recent conversation."""
+        if not self.engine or not self.engine.llm:
+            self.console.print("[dim]No LLM available.[/]")
+            return
+        if not self.messages:
+            self.console.print("[dim]No conversation to extract from.[/]")
+            return
+
+        from kageko.learning.skills import SkillEngine
+
+        async def _run():
+            se = SkillEngine(db=self.db, llm=self.engine.llm)
+            # Convert kageko Message objects to plain dicts
+            msg_dicts = [
+                {"role": m.role, "content": m.content[:300]}
+                for m in self.messages[-12:]  # last ~6 exchanges
+                if m.role in ("user", "assistant")
+            ]
+            self.console.print("[dim]Analyzing conversation for reusable skill...[/]")
+            result = await se.create_from_conversation(msg_dicts)
+            if result:
+                self.console.print(f"[green]Extracted skill: [bold]{result['name']}[/] v{result.get('version','?')}[/]")
+                self.console.print(f"  Description: {result.get('description','')}")
+                self.console.print(f"  Trigger: {result.get('trigger','')}")
+                steps = result.get("steps", [])
+                if steps:
+                    self.console.print(f"  Steps ({len(steps)}):")
+                    for s in steps:
+                        self.console.print(f"    - {s}")
+                # Also persist to DB
+                if self.db:
+                    await self.db.save_skill(
+                        name=result["name"],
+                        version=result.get("version", "1.0.0"),
+                        trigger=result.get("trigger", ""),
+                        description=result.get("description", ""),
+                        content="\n".join(result.get("steps", [])),
+                        tags=result.get("tags", []),
+                    )
+                    self.console.print("  [dim]Saved to database.[/]")
+            else:
+                self.console.print("[dim]No reusable skill pattern found.[/]")
+
+        self._run_async(_run())
+
+    def _qaoa_trajectories(self, _args: str) -> None:
+        """Show recent QAOA trajectories."""
+        if not self.db:
+            self.console.print("[dim]No database available.[/]")
+            return
+
+        async def _run():
+            trajs = await self.db.get_recent_trajectories(days=90)
+            if not trajs:
+                self.console.print("[dim]No QAOA trajectories recorded yet.[/]")
+                return
+
+            table = Table(title=f"QAOA Trajectories ({len(trajs)} recent)")
+            table.add_column("ID", style="dim", max_width=8)
+            table.add_column("Query", max_width=40)
+            table.add_column("Actions", justify="right")
+            table.add_column("Answer", max_width=30)
+            table.add_column("Created", style="dim")
+
+            for t in trajs[:20]:
+                tid = str(t.get("id", ""))[:8]
+                query = (t.get("query") or "")[:40]
+                actions = len(t.get("actions", []))
+                answer = (t.get("answer") or "")[:30]
+                created = (t.get("created_at") or "")[:19]
+                table.add_row(tid, query, str(actions), answer, created)
+
+            self.console.print(table)
+            total = await self.db.get_trajectory_count()
+            self.console.print(f"\n[dim]{len(trajs)} recent of {total} total trajectories[/]")
+
+        self._run_async(_run())
+
+    @staticmethod
+    def _run_async(coro) -> None:
+        """Run an async coroutine, handling nested event loop scenarios."""
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                pool.submit(asyncio.run, coro).result()
+        else:
+            asyncio.run(coro)
+
+    # ---- session management -----------------------------------------------
 
     def _undo(self, _args: str) -> None:
         """Remove last user+assistant message pair."""

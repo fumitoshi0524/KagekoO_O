@@ -5,6 +5,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from kageko.types import Message
+
 logger = logging.getLogger("kageko.learning.tools")
 
 
@@ -54,7 +56,7 @@ class ToolGenerator:
             "parameters (JSON Schema), and implementation (Python function body).\n"
             "Return ONLY valid JSON."
         )
-        response = await self.llm.chat([{"role": "user", "content": prompt}])
+        response = await self.llm.chat([Message(role="user", content=prompt)])
         try:
             tool_def = json.loads(response.content)
         except json.JSONDecodeError:

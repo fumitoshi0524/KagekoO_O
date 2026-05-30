@@ -19,6 +19,12 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _now_with_offset(days: int = 0) -> str:
+    """Return UTC timestamp with an optional day offset in ISO format."""
+    from datetime import timedelta
+    return (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
+
+
 # ---------------------------------------------------------------------------
 # Dataclasses
 # ---------------------------------------------------------------------------
@@ -771,3 +777,115 @@ class KagekoDB:
             (action, detail, now),
         )
         await self._conn.commit()
+
+    # ---- recent trajectories (for QAOA tool generation) --------------------
+
+    async def get_recent_trajectories(self, days: int = 30) -> list[dict]:
+        """Get trajectories from the last N days, with parsed steps."""
+        import time as _time
+        cutoff = _now_with_offset(days=-days)
+        cursor = await self._conn.execute(
+            "SELECT * FROM trajectories WHERE created_at >= ? ORDER BY id DESC",
+            (cutoff,),
+        )
+        rows = await cursor.fetchall()
+        result: list[dict] = []
+        for r in rows:
+            try:
+                steps = json.loads(r["steps_json"])
+            except (json.JSONDecodeError, KeyError):
+                steps = []
+            result.append({
+                "id": r["id"],
+                "query": r["query"],
+                "actions": steps,  # expected by ToolGenerator.analyze_and_generate
+                "answer": r["answer"],
+                "created_at": r["created_at"],
+            })
+        return result
+
+    async def get_trajectory_count(self) -> int:
+        """Return total number of trajectories."""
+        cursor = await self._conn.execute("SELECT COUNT(*) FROM trajectories")
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+    # ---- memory listing / stats -------------------------------------------
+
+    async def list_memory(self, limit: int = 20) -> list[MemoryRecord]:
+        """List recent memory entries."""
+        cursor = await self._conn.execute(
+            "SELECT * FROM memory ORDER BY created_at DESC LIMIT ?", (limit,)
+        )
+        rows = await cursor.fetchall()
+        return [
+            MemoryRecord(
+                id=r["id"], content=r["content"], tags=r["tags"],
+                source=r["source"], session_id=r["session_id"],
+                created_at=r["created_at"],
+            )
+            for r in rows
+        ]
+
+    async def get_memory_count(self) -> int:
+        """Return total number of memory entries."""
+        cursor = await self._conn.execute("SELECT COUNT(*) FROM memory")
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+    # ---- skills listing ----------------------------------------------------
+
+    async def get_skills_all(self) -> list[SkillRecord]:
+        """List all skills with their state."""
+        cursor = await self._conn.execute(
+            "SELECT * FROM skills ORDER BY updated_at DESC"
+        )
+        rows = await cursor.fetchall()
+        return [
+            SkillRecord(
+                id=r["id"], name=r["name"], version=r["version"],
+                trigger=r["trigger"], description=r["description"],
+                content=r["content"], tags=json.loads(r["tags"]),
+                created_at=r["created_at"], updated_at=r["updated_at"],
+            )
+            for r in rows
+        ]
+
+    async def get_skills_count(self) -> int:
+        """Return total number of skills."""
+        cursor = await self._conn.execute("SELECT COUNT(*) FROM skills")
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+    # ---- generated tools listing ------------------------------------------
+
+    async def get_tools_generated(self) -> list[dict]:
+        """List generated tools."""
+        cursor = await self._conn.execute(
+            "SELECT name, description, schema_json, source, enabled, created_at "
+            "FROM tools WHERE source = 'generated' ORDER BY created_at DESC"
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_tools_count(self) -> int:
+        """Return total number of tools."""
+        cursor = await self._conn.execute("SELECT COUNT(*) FROM tools")
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+    # ---- curator log -------------------------------------------------------
+
+    async def get_curator_log(self, limit: int = 20) -> list[dict]:
+        """List recent curator actions."""
+        cursor = await self._conn.execute(
+            "SELECT * FROM curator_log ORDER BY created_at DESC LIMIT ?", (limit,)
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_curator_log_count(self) -> int:
+        """Return total number of curator log entries."""
+        cursor = await self._conn.execute("SELECT COUNT(*) FROM curator_log")
+        row = await cursor.fetchone()
+        return row[0] if row else 0

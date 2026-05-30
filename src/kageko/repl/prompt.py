@@ -24,6 +24,14 @@ _SLASH_DESCRIPTIONS: dict[str, str] = {
     "/retry": "Retry last assistant reply",
     "/config": "Show or edit configuration",
     "/search": "Search memory and sessions",
+    "/memory": "Show recent memory entries (FTS5 recall)",
+    "/skills-list": "List all extracted skills (active/stale/archived)",
+    "/tools-generated": "List LLM-generated tools from QAOA patterns",
+    "/evolution-stats": "Overview: memory / skills / tools / trajectories / curator",
+    "/qaoa-generate": "Manually trigger tool generation from QAOA trajectories",
+    "/qaoa-trajectories": "Show recent QAOA trajectory records",
+    "/nudge-now": "Force immediate fact extraction (skip N-turn wait)",
+    "/skill-extract": "Extract a reusable skill from recent conversation",
 }
 
 

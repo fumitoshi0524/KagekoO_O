@@ -291,6 +291,7 @@ async def _single_query(config, query: str) -> None:
     from kageko.agent.loop import AgentEngine
     from kageko.agent.permissions import PermissionPipeline, SecurityMode
     from kageko.data.db import KagekoDB
+    from kageko.learning.memory import MemoryManager
     from kageko.llm import LLMAdapter
     from kageko.tools.registry import ToolRegistry, Tool
     from kageko.tools.builtin import BUILTIN_TOOLS
@@ -304,6 +305,8 @@ async def _single_query(config, query: str) -> None:
 
     db = KagekoDB(config.database.path)
     await db.init()
+
+    memory_mgr = MemoryManager(db)
 
     from kageko.llm.providers import resolve_provider as _resolve_provider
     _provider = _resolve_provider(config.agent.provider) if config.agent.provider else None
@@ -352,15 +355,25 @@ async def _single_query(config, query: str) -> None:
     async def on_tool_end(name, result, is_error):
         render_tool_result(console, name, result, is_error=is_error)
 
+    system_prompt = config.agent.system_prompt or "You are Kageko, a helpful AI assistant."
+    memory_snapshot = await memory_mgr.load_snapshot()
+    if memory_snapshot:
+        system_prompt = (
+            system_prompt
+            + "\n\n[Long-term memory — facts from past sessions]\n"
+            + memory_snapshot
+        )
+
     engine = AgentEngine(
         llm=llm,
         tool_registry=registry,
         permissions=permissions,
         max_turns=config.agent.max_turns,
-        system_prompt=config.agent.system_prompt or "You are Kageko, a helpful AI assistant.",
+        system_prompt=system_prompt,
         context_window_size=config.agent.get_context_window_size(),
         on_tool_start=on_tool_start,
         on_tool_end=on_tool_end,
+        memory=memory_mgr,
     )
 
     # Wire up delegate tool after engine creation
@@ -411,6 +424,13 @@ async def _single_query(config, query: str) -> None:
         model=config.agent.model,
         mode=config.agent.mode,
     )
+    # Single-shot: still nudge so facts accumulate across invocations
+    if memory_mgr.nudge():
+        import asyncio as _asyncio
+        _asyncio.create_task(
+            memory_mgr.run_review(messages, llm),
+            name="kageko-nudge-review",
+        )
     if mcp_client:
         await mcp_client.disconnect_all()
     await db.close()
@@ -422,6 +442,7 @@ async def _interactive_chat(config) -> None:
     from kageko.agent.permissions import PermissionPipeline, SecurityMode
     from kageko.agent.ttsr import Correction
     from kageko.data.db import KagekoDB
+    from kageko.learning.memory import MemoryManager
     from kageko.llm import LLMAdapter
     from kageko.tools.registry import ToolRegistry, Tool
     from kageko.tools.builtin import BUILTIN_TOOLS
@@ -432,6 +453,9 @@ async def _interactive_chat(config) -> None:
 
     db = KagekoDB(config.database.path)
     await db.init()
+
+    # Memory manager with Hermes-style Nudge Engine
+    memory_mgr = MemoryManager(db)
 
     # Create DB session for this chat
     import uuid
@@ -479,8 +503,17 @@ async def _interactive_chat(config) -> None:
     )
     permissions.prompt_fn = make_console_prompt_fn(permissions)
 
-    # Build default system prompt if none configured
+    # Build default system prompt if none configured.
+    # If we have memories from previous sessions, freeze a snapshot and
+    # inject it once (Hermes-style — preserves prefix caching).
     system_prompt = config.agent.system_prompt or "You are Kageko, a helpful AI assistant."
+    memory_snapshot = await memory_mgr.load_snapshot()
+    if memory_snapshot:
+        system_prompt = (
+            system_prompt
+            + "\n\n[Long-term memory — facts from past sessions]\n"
+            + memory_snapshot
+        )
 
     async def on_tool_start(name, args):
         render_tool_call(console, name, args, status="pending")
@@ -497,6 +530,7 @@ async def _interactive_chat(config) -> None:
         context_window_size=config.agent.get_context_window_size(),
         on_tool_start=on_tool_start,
         on_tool_end=on_tool_end,
+        memory=memory_mgr,
     )
 
     # Wire up delegate tool after engine creation
@@ -539,7 +573,7 @@ async def _interactive_chat(config) -> None:
     )
 
     messages: list[Message] = []
-    sc = SlashCommands(console, messages, mode, db=db, session=session, tool_registry=registry, config=config)
+    sc = SlashCommands(console, messages, mode, db=db, session=session, tool_registry=registry, config=config, engine=engine)
 
     repl_session = create_repl_session(
         slash_commands=list(sc._commands.keys()),
@@ -613,6 +647,15 @@ async def _interactive_chat(config) -> None:
             model=config.agent.model,
             mode=mode.mode.value,
         )
+
+        # Hermes-style Nudge Engine: every ~N turns, ask the LLM to extract
+        # declarative facts in the background (never blocks the user).
+        if memory_mgr.nudge():
+            import asyncio as _asyncio
+            _asyncio.create_task(
+                memory_mgr.run_review(messages, llm),
+                name="kageko-nudge-review",
+            )
 
     if mcp_client:
         await mcp_client.disconnect_all()

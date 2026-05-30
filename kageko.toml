@@ -6,7 +6,7 @@
 model = "deepseek-chat"
 # Agent mode: "tool-use" (default) or "qaoa" (research trajectory)
 mode = "tool-use"
-# Maximum tool-calling turns per query
+# Maximum tool-calling turns per query (0 = no limit)
 max_turns = 20
 # API key (can also be set via env var: KAGEKO_API_KEY or provider-specific)
 api_key = ""

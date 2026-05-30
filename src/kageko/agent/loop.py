@@ -50,27 +50,21 @@ class AgentEngine:
 
         # Support both new (config-based) and legacy (direct param) construction
         if config is not None:
-            self.config = config
+            self._config = config
             self.llm = llm or LLMAdapter(config.model, config.api_key, config.base_url)
-            self.max_turns = config.max_turns
-            self.system_prompt = config.system_prompt
-            self.context_window_size = config.get_context_window_size()
         else:
             # Legacy path
-            self.config = AgentConfig(
+            self._config = AgentConfig(
                 model=getattr(llm, "model", "") if llm else "",
                 max_turns=max_turns,
                 system_prompt=system_prompt,
                 context_window_size=context_window_size,
             )
             self.llm = llm  # type: ignore[assignment]
-            self.max_turns = max_turns
-            self.system_prompt = system_prompt
-            self.context_window_size = context_window_size
 
         self.registry = registry or tool_registry or ToolRegistry()
         self.memory = memory
-        self.compressor = compressor
+        self._compressor = compressor
         self.guardrails = guardrails
         self.permissions = permissions
         self.on_tool_start = on_tool_start
@@ -82,9 +76,67 @@ class AgentEngine:
         self.last_tokens: int = 0
 
         # If no compressor was injected, create one from the budget
-        if self.compressor is None and self.memory is not None:
+        if self._compressor is None and self.memory is not None:
             budget = ContextBudget(max_tokens=self.context_window_size)
-            self.compressor = ContextCompressor(memory=self.memory, llm=self.llm, budget=budget)
+            self._compressor = ContextCompressor(memory=self.memory, llm=self.llm, budget=budget)
+
+    # ---- config-aware properties (read dynamically so /config changes apply immediately) ----
+
+    @property
+    def max_turns(self) -> int:
+        return self._config.max_turns
+
+    @max_turns.setter
+    def max_turns(self, value: int) -> None:
+        self._config.max_turns = value
+
+    @property
+    def system_prompt(self) -> str:
+        return self._config.system_prompt
+
+    @system_prompt.setter
+    def system_prompt(self, value: str) -> None:
+        self._config.system_prompt = value
+
+    @property
+    def context_window_size(self) -> int:
+        """Return effective context window size. 0 means unlimited."""
+        return self._config.get_context_window_size()
+
+    @context_window_size.setter
+    def context_window_size(self, value: int) -> None:
+        self._config.context_window_size = value
+
+    @property
+    def compressor(self):
+        """Return the compressor (may be None)."""
+        return self._compressor
+
+    @compressor.setter
+    def compressor(self, value):
+        self._compressor = value
+
+    def reload_config(self) -> None:
+        """Called after external config changes (e.g. /config slash command).
+        Updates compressor budget if context_window_size changed."""
+        if self._compressor is not None:
+            self._compressor.budget.max_tokens = self.context_window_size
+
+    async def sync_memory(self, user_text: str, assistant_text: str, session_id: str = "") -> None:
+        """Persist a conversation turn to long-term memory.
+        Called by the CLI after each complete user↔assistant exchange.
+        """
+        if not self.memory:
+            return
+        try:
+            Turn = type("Turn", (), {})  # noqa: N806
+            turn = Turn()
+            turn.user = user_text
+            turn.assistant = assistant_text
+            turn.session_id = session_id
+            await self.memory.sync_turn(turn)
+        except Exception:
+            logging.getLogger("kageko.agent.loop").debug("Memory sync failed", exc_info=True)
 
         # Register builtin tools
         from kageko.tools.builtin import register_all
@@ -158,13 +210,17 @@ class AgentEngine:
 
         schemas = self.registry.schemas()
 
-        for turn in range(self.max_turns):
-            context.turn_count = turn + 1
+        turn = 0
+        while self.max_turns == 0 or turn < self.max_turns:
+            turn += 1
+            context.turn_count = turn
 
             # Check context budget and compress if needed
-            if self.compressor:
+            # context_window_size == 0 means unlimited — skip compression entirely
+            cw_size = self.context_window_size
+            if cw_size > 0 and self.compressor:
                 estimated = self.compressor.estimate_tokens(messages)
-                if estimated > self.context_window_size * 0.8:
+                if estimated > cw_size * 0.8:
                     messages = self.compressor.compress(messages, estimated)
 
             # Get LLM response
@@ -180,19 +236,9 @@ class AgentEngine:
             messages.append(assistant_msg)
 
             if not response.has_tool_calls():
-                # Memory sync after completion
-                if self.memory:
-                    try:
-                        await self.memory.sync_turn(type("Turn", (), {
-                            "user": message,
-                            "assistant": response.content or "",
-                        })())
-                    except Exception:
-                        logging.getLogger("kageko.agent.loop").debug("Memory sync failed", exc_info=True)
-
                 return AgentResult(
                     answer=response.content,
-                    turn_count=turn + 1,
+                    turn_count=turn,
                     tokens_used=context.tokens_used,
                     messages=messages,
                 )
@@ -215,7 +261,7 @@ class AgentEngine:
                     elif decision.action == "halt":
                         return AgentResult(
                             answer=f"Stopped: {decision.message}",
-                            turn_count=turn + 1,
+                            turn_count=turn,
                             tokens_used=context.tokens_used,
                             messages=messages,
                         )
@@ -271,7 +317,7 @@ class AgentEngine:
 
         return AgentResult(
             answer="(max turns reached)",
-            turn_count=self.max_turns,
+            turn_count=turn,
             tokens_used=context.tokens_used,
             messages=messages,
         )
@@ -289,10 +335,14 @@ class AgentEngine:
         schemas = self.registry.schemas()
 
         total_tokens = 0
-        for _turn in range(self.max_turns):
-            if self.compressor:
+        _turn = 0
+        while self.max_turns == 0 or _turn < self.max_turns:
+            _turn += 1
+            # context_window_size == 0 means unlimited — skip compression entirely
+            cw_size = self.context_window_size
+            if cw_size > 0 and self.compressor:
                 estimated = self.compressor.estimate_tokens(messages)
-                if estimated > self.context_window_size * 0.8:
+                if estimated > cw_size * 0.8:
                     messages = self.compressor.compress(messages, estimated)
 
             token_stream = self.llm.chat_stream(messages, tools=schemas)

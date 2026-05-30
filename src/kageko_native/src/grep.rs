@@ -1,6 +1,6 @@
 use grep_regex::RegexMatcher;
 use grep_searcher::sinks::UTF8;
-use grep_searcher::{Searcher, SearcherBuilder};
+use grep_searcher::SearcherBuilder;
 use pyo3::prelude::*;
 use std::path::Path;
 
@@ -17,6 +17,7 @@ pub struct GrepMatch {
 
 /// In-process grep using ripgrep internals. No subprocess spawned.
 #[pyfunction]
+#[pyo3(signature = (pattern, path, max_results=None))]
 pub fn ripgrep(
     pattern: &str,
     path: &str,

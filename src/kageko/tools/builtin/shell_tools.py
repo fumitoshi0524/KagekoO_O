@@ -63,15 +63,26 @@ async def native_shell_handler(args: dict) -> str:
     except ImportError:
         return "[ERROR] Native shell module not compiled. Run: pip install -e ."
 
-    async with _shell_lock:
-        if _shell_instance is None:
-            _shell_instance = NativeShell()
-
     command = args.get("command")
     if not command:
         return "[ERROR] Missing required parameter: 'command'"
-    try:
-        result = _shell_instance.exec(command)
-        return result
-    except Exception as e:
-        return f"[ERROR] {type(e).__name__}: {e}"
+
+    # Hold the lock for the entire exec to prevent concurrent mutation of
+    # NativeShell state (cwd, env_vars, last_exit_code).
+    async with _shell_lock:
+        try:
+            if _shell_instance is None:
+                _shell_instance = NativeShell()
+            result = _shell_instance.exec(command)
+        except Exception as e:
+            # If the shell is in a bad state (e.g. corrupted cwd), recreate it
+            msg = str(e)
+            if "os error 267" in msg or "directory" in msg.lower():
+                _shell_instance = NativeShell()
+                try:
+                    result = _shell_instance.exec(command)
+                except Exception as e2:
+                    return f"[ERROR] {type(e2).__name__}: {e2}"
+            else:
+                return f"[ERROR] {type(e).__name__}: {e}"
+    return result

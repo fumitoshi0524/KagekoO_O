@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kageko.types import Message
+
 
 def validate_frontmatter(
     *,
@@ -79,7 +81,7 @@ class SkillEngine:
             "Return JSON with: name, version, description, trigger, tags, steps.\n\n"
             + "\n".join(f"{m['role']}: {m['content'][:200]}" for m in messages[-6:])
         )
-        response = await self.llm.chat([{"role": "user", "content": prompt}])
+        response = await self.llm.chat([Message(role="user", content=prompt)])
         try:
             skill_data = json.loads(response.content)
             errors = validate_frontmatter(
