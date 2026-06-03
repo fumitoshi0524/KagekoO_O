@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+
+logger = logging.getLogger("kageko.cli")
 import sys
 from pathlib import Path
 
@@ -15,6 +17,74 @@ from kageko.repl.tool_card import render_tool_call, render_tool_result
 from kageko.types import ToolCall
 
 KNOWN_COMMANDS = {"chat", "tui", "version", "setup", "--help", "--version", "-h"}
+
+# ── System prompt builder (shared across all modes) ─────────────────────
+
+_TOOL_GUIDE = ""
+
+
+
+def _repair_incomplete_tool_calls(messages: list) -> None:
+    """Ensure every assistant tool_calls message has matching tool responses.
+
+    Ctrl+C during stream execution can leave the message list in an invalid
+    state: assistant with tool_calls but no tool-role response per call_id.
+    DeepSeek (and OpenAI) reject this with a 400 error on the next request.
+    We patch it by injecting synthetic error tool messages so the LLM can
+    continue the conversation rather than crash.
+    """
+    for i, msg in enumerate(messages):
+        if msg.role != "assistant" or not msg.tool_calls:
+            continue
+        # Collect all expected tool_call_ids
+        expected_ids = {tc.id for tc in msg.tool_calls}
+        # Find which ones got responses (messages after this one with role=tool)
+        responded_ids = set()
+        for j in range(i + 1, len(messages)):
+            follow = messages[j]
+            if follow.role == "tool" and follow.tool_call_id:
+                responded_ids.add(follow.tool_call_id)
+            elif follow.role == "assistant":
+                break  # next assistant turn — stop looking
+        missing = expected_ids - responded_ids
+        if not missing:
+            continue
+        # Inject synthetic error messages for missing tool calls
+        from kageko.types import Message as _M, ToolResult as _TR
+        insert_at = i + 1
+        for tc in msg.tool_calls:
+            if tc.id in missing:
+                tr = _TR(
+                    tool_call_id=tc.id,
+                    content=f"[CANCELLED] Tool '{tc.name}' was interrupted by user before completion.",
+                    is_error=True,
+                    tool_name=tc.name,
+                )
+                messages.insert(insert_at, tr.to_message())
+                insert_at += 1
+
+
+async def _build_system_prompt(config, memory_mgr=None) -> str:
+    """Assemble the full system prompt from config, tool guide, memory, and skills."""
+    base = config.agent.system_prompt or "You are Kageko, a helpful AI assistant."
+    parts = [base, _TOOL_GUIDE]
+
+    if memory_mgr is not None:
+        # Frozen memory snapshot (Hermes-style: injected once at session start)
+        snapshot = await memory_mgr.load_snapshot()
+        if snapshot:
+            parts.append("[Long-term memory — facts from past sessions]\n" + snapshot)
+
+        # Skill index (compact name+description list)
+        if hasattr(memory_mgr, "skill_store"):
+            try:
+                idx = await memory_mgr.skill_store.index_text()
+            except Exception:
+                idx = ""
+            if idx:
+                parts.append(idx)
+
+    return "\n\n".join(parts)
 
 
 def _rewrite_argv() -> None:
@@ -99,6 +169,11 @@ def tui(
             provider=_provider,
         )
 
+        from kageko.tools.builtin import wire_learning
+        from kageko.learning import MemoryManager
+        memory_mgr = MemoryManager(db, llm=llm)
+        wire_learning(memory_mgr)
+
         registry = ToolRegistry()
         for t in BUILTIN_TOOLS:
             if t["fn"] is not None:
@@ -121,7 +196,7 @@ def tui(
             tool_registry=registry,
             permissions=permissions,
             max_turns=config.agent.max_turns,
-            system_prompt=config.agent.system_prompt or "You are Kageko, a helpful AI assistant.",
+            system_prompt=await _build_system_prompt(config, memory_mgr),
             context_window_size=config.agent.get_context_window_size(),
         )
 
@@ -306,8 +381,6 @@ async def _single_query(config, query: str) -> None:
     db = KagekoDB(config.database.path)
     await db.init()
 
-    memory_mgr = MemoryManager(db)
-
     from kageko.llm.providers import resolve_provider as _resolve_provider
     _provider = _resolve_provider(config.agent.provider) if config.agent.provider else None
     llm = LLMAdapter(
@@ -317,6 +390,10 @@ async def _single_query(config, query: str) -> None:
         temperature=config.agent.temperature,
         provider=_provider,
     )
+
+    memory_mgr = MemoryManager(db, llm=llm)
+    from kageko.tools.builtin import wire_learning
+    wire_learning(memory_mgr)
 
     registry = ToolRegistry()
     for t in BUILTIN_TOOLS:
@@ -355,14 +432,7 @@ async def _single_query(config, query: str) -> None:
     async def on_tool_end(name, result, is_error):
         render_tool_result(console, name, result, is_error=is_error)
 
-    system_prompt = config.agent.system_prompt or "You are Kageko, a helpful AI assistant."
-    memory_snapshot = await memory_mgr.load_snapshot()
-    if memory_snapshot:
-        system_prompt = (
-            system_prompt
-            + "\n\n[Long-term memory — facts from past sessions]\n"
-            + memory_snapshot
-        )
+    system_prompt = await _build_system_prompt(config, memory_mgr)
 
     engine = AgentEngine(
         llm=llm,
@@ -375,6 +445,10 @@ async def _single_query(config, query: str) -> None:
         on_tool_end=on_tool_end,
         memory=memory_mgr,
     )
+
+    # Wire curator's QAOA pipeline with the populated registry
+    if hasattr(memory_mgr, "curator") and memory_mgr.curator:
+        memory_mgr.curator.wire_registry(registry)
 
     # Wire up delegate tool after engine creation
     delegate_handler = make_delegate_handler(engine)
@@ -425,7 +499,7 @@ async def _single_query(config, query: str) -> None:
         mode=config.agent.mode,
     )
     # Single-shot: still nudge so facts accumulate across invocations
-    if memory_mgr.nudge():
+    if memory_mgr.nudge_tick():
         import asyncio as _asyncio
         _asyncio.create_task(
             memory_mgr.run_review(messages, llm),
@@ -437,6 +511,8 @@ async def _single_query(config, query: str) -> None:
 
 
 async def _interactive_chat(config) -> None:
+    import signal as _signal
+
     from kageko.agent.delegate import make_delegate_handler
     from kageko.agent.loop import AgentEngine
     from kageko.agent.permissions import PermissionPipeline, SecurityMode
@@ -454,9 +530,6 @@ async def _interactive_chat(config) -> None:
     db = KagekoDB(config.database.path)
     await db.init()
 
-    # Memory manager with Hermes-style Nudge Engine
-    memory_mgr = MemoryManager(db)
-
     # Create DB session for this chat
     import uuid
     session_chat_id = uuid.uuid4().hex[:12]
@@ -471,6 +544,11 @@ async def _interactive_chat(config) -> None:
         temperature=config.agent.temperature,
         provider=_provider,
     )
+
+    # Unified learning system (Hermes-aligned)
+    memory_mgr = MemoryManager(db, llm=llm)
+    from kageko.tools.builtin import wire_learning
+    wire_learning(memory_mgr)
 
     registry = ToolRegistry()
     for t in BUILTIN_TOOLS:
@@ -503,17 +581,7 @@ async def _interactive_chat(config) -> None:
     )
     permissions.prompt_fn = make_console_prompt_fn(permissions)
 
-    # Build default system prompt if none configured.
-    # If we have memories from previous sessions, freeze a snapshot and
-    # inject it once (Hermes-style — preserves prefix caching).
-    system_prompt = config.agent.system_prompt or "You are Kageko, a helpful AI assistant."
-    memory_snapshot = await memory_mgr.load_snapshot()
-    if memory_snapshot:
-        system_prompt = (
-            system_prompt
-            + "\n\n[Long-term memory — facts from past sessions]\n"
-            + memory_snapshot
-        )
+    system_prompt = await _build_system_prompt(config, memory_mgr)
 
     async def on_tool_start(name, args):
         render_tool_call(console, name, args, status="pending")
@@ -532,6 +600,10 @@ async def _interactive_chat(config) -> None:
         on_tool_end=on_tool_end,
         memory=memory_mgr,
     )
+
+    # Wire curator's QAOA pipeline with the populated registry
+    if hasattr(memory_mgr, "curator") and memory_mgr.curator:
+        memory_mgr.curator.wire_registry(registry)
 
     # Wire up delegate tool after engine creation
     delegate_handler = make_delegate_handler(engine)
@@ -575,6 +647,26 @@ async def _interactive_chat(config) -> None:
     messages: list[Message] = []
     sc = SlashCommands(console, messages, mode, db=db, session=session, tool_registry=registry, config=config, engine=engine)
 
+    # ── Background curator daemon (Hermes-style, 7-day cycle) ───────────
+    from kageko.learning.curator import Curator, CuratorConfig
+
+    _curator = Curator(db, CuratorConfig(interval_hours=168))  # 7 days
+    _curator_stop = asyncio.Event()
+
+    async def _curator_daemon():
+        while not _curator_stop.is_set():
+            try:
+                await asyncio.sleep(3600)  # check every hour
+                if await _curator.maybe_run():
+                    logger.info("Curator daemon: maintenance ran")
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.debug("Curator daemon error", exc_info=True)
+
+    _curator_task = asyncio.create_task(_curator_daemon(), name="kageko-curator")
+    # ─────────────────────────────────────────────────────────────────────
+
     repl_session = create_repl_session(
         slash_commands=list(sc._commands.keys()),
     )
@@ -585,13 +677,14 @@ async def _interactive_chat(config) -> None:
         except (EOFError, KeyboardInterrupt):
             console.print("\n[dim]Bye![/]")
             break
-        if user_input.strip().lower() in ("quit", "exit", "q"):
-            break
         if not user_input.strip():
             continue
 
         # Handle slash commands
         if sc.handle(user_input.strip()):
+            if sc.shutdown:
+                console.print("\n[dim]Bye![/]")
+                break
             continue
 
         # Append user message to history and persist to DB
@@ -609,23 +702,94 @@ async def _interactive_chat(config) -> None:
         stream = StreamHandler(console)
         stream.start_spinner("Thinking...")
 
+        # ── Ctrl+C interrupter ───────────────────────────────────────────
+        # Don't `await stream_t` directly — that blocks the event loop
+        # and makes httpx-stuck-in-socket-read invisible to cancellation.
+        # Instead: poll with short timeout + thread-safe task cancel.
+        # First Ctrl+C → cancel → back to REPL in <100ms.
+        # Second Ctrl+C → SIG_DFL → kill process.
+        _loop = asyncio.get_running_loop()
+        stream_t: asyncio.Task | None = None
+        _n_kills = 0
+
+        def _on_sigint(sig, frame):
+            nonlocal _n_kills
+            _n_kills += 1
+            if _n_kills >= 2 or stream_t is None:
+                # Second Ctrl+C (or stream already done): hard kill.
+                _signal.signal(_signal.SIGINT, _signal.SIG_DFL)
+                if stream_t is not None:
+                    _loop.call_soon_threadsafe(stream_t.cancel)
+                return
+            # First Ctrl+C: cancel the stream task.
+            if stream_t is not None:
+                _loop.call_soon_threadsafe(stream_t.cancel)
+
+        _signal.signal(_signal.SIGINT, _on_sigint)
+        # ──────────────────────────────────────────────────────────────────
+
+        outcome = "done"
         try:
-            async for tok in engine.run_stream(messages, mode=mode.mode):
-                if isinstance(tok, Correction):
-                    stream.stop_spinner()
-                    console.print(f"\n[bold red][TTSR][/]: {tok.message}")
-                    break
-                if hasattr(tok, "text") and tok.text:
-                    stream.on_token(tok.text)
-                    assistant_text += tok.text
-            stream.finish()
-        except Exception:
-            stream.stop_spinner()
-            console.print("[dim]Stream interrupted, retrying...[/]")
-            with console.status("Thinking..."):
+            async def _drain_stream():
+                nonlocal assistant_text
                 async for tok in engine.run_stream(messages, mode=mode.mode):
+                    if isinstance(tok, Correction):
+                        stream.stop_spinner()
+                        console.print(f"\n[bold red][TTSR][/]: {tok.message}")
+                        return "correction"
                     if hasattr(tok, "text") and tok.text:
+                        stream.on_token(tok.text)
                         assistant_text += tok.text
+                stream.finish()
+                return "done"
+
+            stream_t = asyncio.ensure_future(_drain_stream())
+
+            # Poll with short timeouts so call_soon_threadsafe can
+            # cancel stream_t even while httpx is blocked on a socket.
+            while not stream_t.done():
+                try:
+                    outcome = await asyncio.wait_for(
+                        asyncio.shield(stream_t), timeout=0.1,
+                    )
+                    break
+                except asyncio.TimeoutError:
+                    continue
+                except asyncio.CancelledError:
+                    outcome = "cancelled"
+                    break
+
+            # Guard: if we fell through the loop because stream_t was
+            # cancelled between poll ticks, outcome is still "done".
+            # Detect cancellation from the task state.
+            if outcome not in ("correction", "cancelled") and stream_t.cancelled():
+                outcome = "cancelled"
+            elif outcome not in ("correction", "cancelled") and stream_t.done():
+                try:
+                    outcome = stream_t.result()
+                except Exception:
+                    outcome = "failed"
+
+        except asyncio.CancelledError:
+            outcome = "cancelled"
+        finally:
+            stream_t = None
+            _signal.signal(_signal.SIGINT, _signal.SIG_DFL)
+
+        if outcome == "cancelled":
+            stream.stop_spinner()
+            console.print("\n[dim]Interrupted.[/]")
+            _repair_incomplete_tool_calls(messages)
+            if assistant_text.strip():
+                messages.append(Message(role="assistant", content=assistant_text))
+                await db.append_message(session.id, role="assistant", content=assistant_text)
+            continue
+
+        if outcome == "correction":
+            pass
+        elif outcome == "failed":
+            pass
+        # "done" → stream.finish() already called
 
         # Append assistant reply to history and persist to DB
         # The engine already appended the assistant message to messages with
@@ -650,12 +814,43 @@ async def _interactive_chat(config) -> None:
 
         # Hermes-style Nudge Engine: every ~N turns, ask the LLM to extract
         # declarative facts in the background (never blocks the user).
-        if memory_mgr.nudge():
+        if memory_mgr.nudge_tick():
             import asyncio as _asyncio
             _asyncio.create_task(
                 memory_mgr.run_review(messages, llm),
                 name="kageko-nudge-review",
             )
+
+    _curator_stop.set()
+    _curator_task.cancel()
+    try:
+        await _curator_task
+    except asyncio.CancelledError:
+        pass
+
+    # ── Post-session Review (Hermes-style) ─────────────────────────────
+    # Fire a background review that cleans up memory facts. No wall-clock
+    # timeout — Hermes uses daemon threads, we use a short-lived task.
+    # We MUST await it before db.close() so the review doesn't orphan.
+    if memory_mgr and hasattr(memory_mgr, "nudge_engine"):
+        try:
+            results = await asyncio.wait_for(
+                memory_mgr.run_review(messages, llm),
+                timeout=15.0,
+            )
+            if results:
+                logger.info("Post-session review: %d actions", len(results))
+        except asyncio.TimeoutError:
+            pass
+        except Exception:
+            logger.debug("Post-session review failed", exc_info=True)
+
+    # Cancel any lingering background nudge tasks
+    for task in asyncio.all_tasks():
+        if task.get_name().startswith("kageko-") and not task.done():
+            task.cancel()
+    # Let cancellations propagate
+    await asyncio.sleep(0.1)
 
     if mcp_client:
         await mcp_client.disconnect_all()

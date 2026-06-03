@@ -78,6 +78,8 @@ class SkillEngine:
         """Layer 1: Extract skill from conversation messages."""
         prompt = (
             "Extract a reusable skill from this conversation. "
+            "Write ALL fields (name, description, trigger, steps) in **English**, "
+            "regardless of the conversation language.\n"
             "Return JSON with: name, version, description, trigger, tags, steps.\n\n"
             + "\n".join(f"{m['role']}: {m['content'][:200]}" for m in messages[-6:])
         )

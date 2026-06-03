@@ -12,7 +12,7 @@ max_turns = 20
 api_key = ""
 # API base URL (leave empty for provider default)
 base_url = ""
-# Context window size in tokens (0 = auto-detect from model)
+# Context window size in tokens (0 = auto-detect, fallback 128K)
 context_window_size = 0
 # Sampling temperature (ignored for deepseek-reasoner)
 temperature = 0.7

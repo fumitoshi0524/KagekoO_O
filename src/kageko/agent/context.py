@@ -60,9 +60,29 @@ class ContextCompressor:
             self._consecutive_low_savings = 0
             return messages
 
-        head = messages[: self.budget.head_count]
-        tail = messages[-self.budget.tail_count :]
-        middle = messages[self.budget.head_count : -self.budget.tail_count]
+        # Find a safe tail boundary: never split a tool-call sequence.
+        # DeepSeek requires every assistant(tool_calls=...) to be immediately
+        # followed by tool-role messages for each tool_call_id.
+        tail_start = max(len(messages) - self.budget.tail_count, 0)
+        # Walk backwards: if the tail would start with an orphan tool message
+        # or inside a tool-call block, expand the tail backwards.
+        for i in range(len(messages) - 1, 0, -1):
+            if messages[i].role == "tool" and i >= tail_start:
+                # Find the assistant that owns this tool_call_id
+                for k in range(i - 1, -1, -1):
+                    p = messages[k]
+                    if p.role == "assistant" and p.tool_calls:
+                        if any(tc.id == messages[i].tool_call_id for tc in p.tool_calls):
+                            # Pull the assistant into the tail too
+                            tail_start = min(tail_start, k)
+                            break
+            if messages[i].role == "assistant" and messages[i].tool_calls and i >= tail_start:
+                # Pull this assistant+following tools into the tail
+                tail_start = min(tail_start, i)
+
+        head = messages[:self.budget.head_count]
+        tail = messages[tail_start:]
+        middle = messages[self.budget.head_count:tail_start]
         if not middle:
             return messages
 

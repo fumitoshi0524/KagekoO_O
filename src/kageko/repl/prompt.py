@@ -32,6 +32,9 @@ _SLASH_DESCRIPTIONS: dict[str, str] = {
     "/qaoa-trajectories": "Show recent QAOA trajectory records",
     "/nudge-now": "Force immediate fact extraction (skip N-turn wait)",
     "/skill-extract": "Extract a reusable skill from recent conversation",
+    "/quit": "Exit the chat session",
+    "/exit": "Exit the chat session",
+    "/q": "Exit the chat session",
 }
 
 

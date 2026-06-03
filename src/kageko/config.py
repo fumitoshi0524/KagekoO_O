@@ -27,7 +27,7 @@ class AgentConfig:
     max_turns: int = 20
     api_key: str = ""
     base_url: str = "https://api.openai.com/v1"
-    context_window_size: int = 0  # 0 = auto-detect from model info
+    context_window_size: int = 0  # 0 = auto-detect (fallback: 128K)
     temperature: float = 0.7
     system_prompt: str = ""
     provider: str = ""
@@ -37,7 +37,6 @@ class AgentConfig:
         """Resolve context window size, auto-detecting from provider/model if set to 0."""
         if self.context_window_size > 0:
             return self.context_window_size
-        # Try to auto-detect from provider profile
         try:
             from kageko.llm.providers import resolve_provider, get_model_info
             profile = resolve_provider(self.provider) if self.provider else None
@@ -47,7 +46,9 @@ class AgentConfig:
                     return info.context_window
         except Exception:
             pass
-        return 8000  # fallback default
+        # Modern LLMs all have >=128K context. The old 8000 fallback is from
+        # the GPT-3.5 era. 128K is a safe default for any recent API.
+        return 131072
 
 
 @dataclass

@@ -31,11 +31,29 @@ class CuratorConfig:
 
 
 class Curator:
-    """Background maintenance for skills and tools with state machine transitions."""
+    """Background maintenance — Hermes-aligned 5-stage pipeline.
 
-    def __init__(self, db: KagekoDB, config: CuratorConfig | None = None):
+    Runs on a configurable cycle (default: 7 days).  Stages:
+      1. State transitions  — active → stale → archive (based on last_used)
+      2. Overlap detection  — flag skills with identical triggers
+      3. Safety audit       — scan generated tools for dangerous patterns
+      4. QAOA Analytics     — collect trajectory stats (no LLM)
+      5. QAOA Review        — LLM evaluates → promotes (skill→tool, cluster→MCP)
+    """
+
+    def __init__(self, db: KagekoDB, config: CuratorConfig | None = None, *, llm=None, registry=None):
         self.db = db
         self.config = config or CuratorConfig()
+        self._llm = llm        # for QAOA stage
+        self._registry = registry  # for QAOA stage
+
+    # ── Wire LLM/registry after construction (avoids circular imports) ──
+
+    def wire_llm(self, llm):
+        self._llm = llm
+
+    def wire_registry(self, registry):
+        self._registry = registry
 
     async def log_action(
         self, action: str, target_type: str, target_name: str, details: str = ""
@@ -52,12 +70,73 @@ class Curator:
         return True
 
     async def maintain(self) -> list[str]:
-        """Run full maintenance cycle. Returns list of actions taken."""
+        """Run full maintenance cycle — all 4 stages. Returns list of actions taken."""
         actions = []
+        # Stage 1: state transitions
         actions += await self._transition_states()
+        # Stage 2: overlap detection
+        actions += await self._grade_and_consolidate()
+        # Stage 3: safety audit existing tools
         actions += await self._audit_tools()
+        # Stage 4: QAOA — analytics → LLM evaluation → promotion
+        qaoa_actions = await self._qaoa_review()
+        if qaoa_actions:
+            actions += qaoa_actions
         self._save_state()
         logger.info("Curator maintenance: %d actions", len(actions))
+        return actions
+
+    async def run_qaoa_pipeline(self) -> str:
+        """Public entry point for manual QAOA trigger (/qaoa-generate, agent tool).
+
+        Runs the full pipeline: Analytics → Evaluate → Promote.
+        Returns a human-readable summary string.
+        """
+        if not self._llm:
+            return "QAOA pipeline: no LLM wired."
+
+        from kageko.qaoa.tool_generator import ToolGenerator
+
+        gen = ToolGenerator(self.db, self._llm, registry=self._registry)
+        summary = await gen.run()
+        return f"QAOA pipeline complete.\n{summary}"
+
+    async def _qaoa_review(self) -> list[str]:
+        """QAOA pipeline — Analytics → Evaluate → Promote.
+
+        Run during Curator maintenance. LLM makes all decisions;
+        no hardcoded thresholds.
+        """
+        if not self._llm:
+            return []
+        try:
+            from kageko.qaoa.tool_generator import ToolGenerator
+
+            gen = ToolGenerator(self.db, self._llm, registry=self._registry)
+            summary = await gen.run()
+            await self.log_action("qaoa", "review", "", summary)
+            return [summary]
+        except Exception:
+            logger.debug("QAOA review failed", exc_info=True)
+            return []
+
+    async def _grade_and_consolidate(self) -> list[str]:
+        """Hermes-style grading: flag skills with identical triggers for consolidation."""
+        actions = []
+        skills = await self.db.get_skills_all()
+        if len(skills) < 2:
+            return actions
+        # Group by trigger
+        by_trigger: dict[str, list] = {}
+        for s in skills:
+            trigger = getattr(s, "trigger", "") or ""
+            if trigger:
+                by_trigger.setdefault(trigger, []).append(s.name)
+        for trigger, names in by_trigger.items():
+            if len(names) >= 2:
+                msg = f"overlap: {', '.join(names)} share trigger '{trigger}'"
+                actions.append(msg)
+                await self.log_action("overlap_detected", "skill", ", ".join(names), f"shared trigger: {trigger}")
         return actions
 
     async def _transition_states(self) -> list[str]:

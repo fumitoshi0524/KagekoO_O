@@ -134,6 +134,7 @@ class SlashCommands:
         self.config = config
         self.engine = engine  # AgentEngine reference for hot-reload
         self.memory = None  # will be set by cli.py if available
+        self.shutdown: bool = False  # set by /quit — caller reads this to break loop
 
         self._commands: dict[str, Any] = {
             "/help": self._help,
@@ -155,6 +156,9 @@ class SlashCommands:
             "/qaoa-trajectories": self._qaoa_trajectories,
             "/nudge-now": self._nudge_now,
             "/skill-extract": self._skill_extract,
+            "/quit": self._quit,
+            "/exit": self._quit,
+            "/q": self._quit,
         }
 
     # ---- public API -------------------------------------------------------
@@ -208,6 +212,7 @@ class SlashCommands:
                 ("/resume [N|ID]", "Show sessions and pick one to resume"),
                 ("/history [N]", "Show last N messages (default 10)"),
                 ("/search <Q>", "Search memory and sessions"),
+                ("/quit, /exit, /q", "Exit the chat session"),
             ],
             "Tools & Models": [
                 ("/tools", "List all available tools"),
@@ -635,12 +640,18 @@ class SlashCommands:
 
             self.console.print(table)
 
+            # Show recent memory contents
+            if mem_count > 0:
+                self.console.print("\n[bold]Current Memories:[/]")
+                memories = await self.db.list_memory(limit=20)
+                for m in memories:
+                    self.console.print(f"  • {m.content[:120]}")
+
             # Show last few curator actions
             if curator_count > 0:
                 self.console.print("\n[bold]Recent Curator Actions:[/]")
                 actions = await self.db.get_curator_log(limit=5)
                 for a in actions:
-                    action = a.get("action", "?")
                     detail = a.get("detail", "")
                     created = (a.get("created_at") or "")[:19]
                     self.console.print(f"  [dim]{created}[/] [{a.get('action','?')}] {detail}")
@@ -648,44 +659,23 @@ class SlashCommands:
         self._run_async(_run())
 
     def _qaoa_generate(self, _args: str) -> None:
-        """Manually trigger QAOA tool generation from recent trajectories."""
-        if not self.db:
-            self.console.print("[dim]No database available.[/]")
+        """Run the full QAOA pipeline: detect→generate→audit→register."""
+        if not self.engine or not self.engine.memory:
+            self.console.print("[dim]No learning system wired.[/]")
             return
 
-        from kageko.learning.tools import ToolGenerator
-        from kageko.learning.curator import Curator
-
         async def _run():
-            # Need LLM for generation
-            if not self.config:
-                self.console.print("[dim]No config — cannot create LLM client.[/]")
+            mgr = self.engine.memory
+            curator = getattr(mgr, "curator", None)
+            if curator is None:
+                self.console.print("[dim]Curator not wired — cannot run QAOA pipeline.[/]")
                 return
 
-            from kageko.llm import LLMAdapter
-            from kageko.llm.providers import resolve_provider
+            self.console.print("[dim]QAOA pipeline: detect → generate → audit → register...[/]")
+            report = await curator.run_qaoa_pipeline()
+            self.console.print(report)
 
-            provider = resolve_provider(self.config.agent.provider) if self.config.agent.provider else None
-            llm = LLMAdapter(
-                model=self.config.agent.model,
-                api_key=self.config.agent.api_key,
-                base_url=self.config.agent.base_url,
-                temperature=self.config.agent.temperature,
-                provider=provider,
-            )
-
-            curator = Curator(self.db)
-            gen = ToolGenerator(db=self.db, llm=llm, registry=self.tool_registry, curator=curator)
-
-            self.console.print("[dim]Analyzing recent QAOA trajectories...[/]")
-            result = await gen.analyze_and_generate()
-
-            if result:
-                self.console.print(f"[green]Generated tool: [bold]{result['name']}[/][/]")
-                self.console.print(f"  Description: {result.get('description', '')}")
-                self.console.print(f"  Category: {result.get('category', 'utility')}")
-            else:
-                self.console.print("[dim]No repeated patterns found (need >=3 identical tool calls in recent trajectories).[/]")
+        self._run_async(_run())
 
         self._run_async(_run())
 
@@ -699,12 +689,12 @@ class SlashCommands:
             return
 
         async def _run():
-            self.console.print("[dim]Extracting facts from recent conversation...[/]")
-            entries = await self.engine.memory.run_review(self.messages, self.engine.llm)
-            if entries:
-                self.console.print(f"[green]Extracted {len(entries)} facts:[/]")
-                for e in entries:
-                    self.console.print(f"  • {e.content}")
+            self.console.print("[dim]Running background memory review...[/]")
+            results = await self.engine.memory.run_review(self.messages, self.engine.llm)
+            if results:
+                self.console.print(f"[green]Review results ({len(results)} actions):[/]")
+                for r in results:
+                    self.console.print(f"  • {r}")
             else:
                 self.console.print("[dim]Nothing worth saving this time.[/]")
 
@@ -806,6 +796,10 @@ class SlashCommands:
             asyncio.run(coro)
 
     # ---- session management -----------------------------------------------
+
+    def _quit(self, _args: str) -> None:
+        """Quit the chat session."""
+        self.shutdown = True
 
     def _undo(self, _args: str) -> None:
         """Remove last user+assistant message pair."""

@@ -889,3 +889,75 @@ class KagekoDB:
         cursor = await self._conn.execute("SELECT COUNT(*) FROM curator_log")
         row = await cursor.fetchone()
         return row[0] if row else 0
+
+    # ---- skill management (Hermes-style) -----------------------------------
+
+    async def skill_touch(self, name: str) -> None:
+        """Bump last_used timestamp for a skill (called when agent invokes it)."""
+        import time as _time
+        await self._conn.execute(
+            "UPDATE skills SET last_used = ? WHERE name = ?",
+            (_time.time(), name),
+        )
+        await self._conn.commit()
+
+    async def skill_pin(self, name: str) -> bool:
+        """Pin a skill so it's protected from curator archival. Returns True if found."""
+        cursor = await self._conn.execute(
+            "UPDATE skills SET pinned = 1 WHERE name = ?", (name,),
+        )
+        await self._conn.commit()
+        return cursor.rowcount > 0
+
+    async def skill_unpin(self, name: str) -> bool:
+        """Unpin a skill. Returns True if found."""
+        cursor = await self._conn.execute(
+            "UPDATE skills SET pinned = 0 WHERE name = ?", (name,),
+        )
+        await self._conn.commit()
+        return cursor.rowcount > 0
+
+    async def skill_patch(self, name: str, find: str, replace: str) -> bool:
+        """Fuzzy find-and-replace inside a skill's content. Returns True if found."""
+        cursor = await self._conn.execute(
+            "SELECT content FROM skills WHERE name = ?", (name,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return False
+        content = row[0]
+        if find not in content:
+            return False
+        new_content = content.replace(find, replace)
+        import time as _time
+        now = _time.time()
+        await self._conn.execute(
+            "UPDATE skills SET content = ?, updated_at = datetime(?, 'unixepoch'), last_used = ? WHERE name = ?",
+            (new_content, now, now, name),
+        )
+        await self._conn.commit()
+        return True
+
+    async def skill_get_state(self, name: str) -> str | None:
+        """Return a skill's state (active/stale/archived) or None."""
+        cursor = await self._conn.execute(
+            "SELECT state FROM skills WHERE name = ?", (name,),
+        )
+        row = await cursor.fetchone()
+        return row["state"] if row else None
+
+    async def skill_set_state(self, name: str, state: str) -> bool:
+        """Explicitly set a skill's state."""
+        cursor = await self._conn.execute(
+            "UPDATE skills SET state = ? WHERE name = ?", (state, name),
+        )
+        await self._conn.commit()
+        return cursor.rowcount > 0
+
+    async def skill_count_by_state(self) -> dict[str, int]:
+        """Return counts per state: {"active": N, "stale": M, "archived": K}."""
+        cursor = await self._conn.execute(
+            "SELECT state, COUNT(*) as cnt FROM skills GROUP BY state"
+        )
+        rows = await cursor.fetchall()
+        return {r["state"]: r["cnt"] for r in rows}

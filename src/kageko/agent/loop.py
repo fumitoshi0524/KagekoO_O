@@ -250,14 +250,12 @@ class AgentEngine:
                     sig = ToolCallSignature(tc.name, tc.args)
                     decision = self.guardrails.check(sig)
                     if decision.action == "block":
-                        result = ToolResult(
-                            tool_call_id=tc.id,
-                            content=decision.message,
-                            is_error=True,
-                            tool_name=tc.name,
+                        return AgentResult(
+                            answer=response.content or f"[BLOCKED] {decision.message}",
+                            turn_count=turn,
+                            tokens_used=context.tokens_used,
+                            messages=messages,
                         )
-                        messages.append(result.to_message())
-                        continue
                     elif decision.action == "halt":
                         return AgentResult(
                             answer=f"Stopped: {decision.message}",
@@ -266,21 +264,18 @@ class AgentEngine:
                             messages=messages,
                         )
 
-                # Permission check (legacy support)
+                # Permission check
                 if self.permissions:
                     from kageko.agent.permissions import Decision
                     decision = await self.permissions.check(tc)
                     if decision == Decision.DENY:
-                        result = ToolResult(
-                            tool_call_id=tc.id,
-                            content=f"[DENIED] Tool '{tc.name}' blocked by security policy",
-                            is_error=True,
-                            tool_name=tc.name,
+                        # User denied — return to conversation immediately.
+                        return AgentResult(
+                            answer=response.content or "(tool execution denied by user)",
+                            turn_count=turn,
+                            tokens_used=context.tokens_used,
+                            messages=messages,
                         )
-                        messages.append(result.to_message())
-                        if self.on_tool_end:
-                            await self.on_tool_end(tc.name, result.content, result.is_error)
-                        continue
                     if decision == Decision.EXECUTE_IN_SANDBOX:
                         result = ToolResult(
                             tool_call_id=tc.id,
@@ -380,15 +375,17 @@ class AgentEngine:
                     for tc in tool_calls:
                         error = await self._check_tool_allowed(tc)
                         if error:
-                            is_halt = error.startswith("HALT:")
+                            is_stop = error.startswith("HALT:") or error.startswith("[DENIED]")
                             messages.append(Message(
                                 role="tool",
                                 content=error,
                                 tool_call_id=tc.id,
                                 tool_name=tc.name,
                             ))
-                            if is_halt:
-                                yield StreamToken(text=f"\n[STOPPED] {error}")
+                            if is_stop:
+                                # User denied or guardrails halted — return to conversation.
+                                if error.startswith("[DENIED]"):
+                                    yield StreamToken(text=f"\n[DENIED] Returning to conversation.\n")
                                 self.last_tokens = total_tokens
                                 return
                             continue
@@ -452,15 +449,16 @@ class AgentEngine:
             for tc in tool_calls:
                 error = await self._check_tool_allowed(tc)
                 if error:
-                    is_halt = error.startswith("HALT:")
+                    is_stop = error.startswith("HALT:") or error.startswith("[DENIED]")
                     messages.append(Message(
                         role="tool",
                         content=error,
                         tool_call_id=tc.id,
                         tool_name=tc.name,
                     ))
-                    if is_halt:
-                        yield StreamToken(text=f"\n[STOPPED] {error}")
+                    if is_stop:
+                        if error.startswith("[DENIED]"):
+                            yield StreamToken(text=f"\n[DENIED] Returning to conversation.\n")
                         self.last_tokens = total_tokens
                         return
                     continue
