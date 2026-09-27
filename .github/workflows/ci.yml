@@ -27,6 +27,9 @@ jobs:
 
       - run: npm run verify:public-tree
       - run: npm ci
+      - name: Make node-pty's macOS spawn helper executable
+        if: runner.os == 'macOS'
+        run: chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
