@@ -89,7 +89,22 @@ async function assertPrivateParent(target: string): Promise<void> {
 			if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
 			throw error;
 		}
-		if (!stat.isDirectory() || stat.isSymbolicLink()) {
+		if (stat.isSymbolicLink()) {
+			// macOS uses root-owned /var and /tmp links into /private. A link
+			// owned by root at the filesystem root cannot be replaced by the
+			// current user; the credential directory itself must still be real.
+			if (
+				process.platform === "darwin" &&
+				current !== privateParent &&
+				path.dirname(current) === root &&
+				stat.uid === 0 &&
+				(await fs.stat(current)).isDirectory()
+			) {
+				continue;
+			}
+			throw new Error(`JSON store parent must be a real directory: ${current}`);
+		}
+		if (!stat.isDirectory()) {
 			throw new Error(`JSON store parent must be a real directory: ${current}`);
 		}
 		// Public ancestors such as /home or /tmp are normal. The directory

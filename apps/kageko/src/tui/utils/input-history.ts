@@ -38,7 +38,7 @@ export async function loadInputHistory(file: string): Promise<string[]> {
 export async function appendInputHistory(file: string, text: string, lastContent?: string): Promise<boolean> {
 	const content = text.trim();
 	if (!content || content === lastContent) return false;
-	await mkdir(path.dirname(file), { recursive: true });
+	await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
 	await appendFile(file, `${JSON.stringify({ content })}\n`, "utf8");
 	return true;
 }

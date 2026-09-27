@@ -41,7 +41,7 @@ export class MetadataStore {
 		return value;
 	}
 	private async write(value: SessionMetadata): Promise<void> {
-		await mkdir(path.dirname(this.filePath), { recursive: true });
+		await mkdir(path.dirname(this.filePath), { recursive: true, mode: 0o700 });
 		const temporary = `${this.filePath}.${process.pid}.${Date.now().toString(36)}.tmp`;
 		let handle: Awaited<ReturnType<typeof open>> | undefined;
 		try {
@@ -59,7 +59,7 @@ export class MetadataStore {
 	}
 
 	private async writeNew(value: SessionMetadata): Promise<void> {
-		await mkdir(path.dirname(this.filePath), { recursive: true });
+		await mkdir(path.dirname(this.filePath), { recursive: true, mode: 0o700 });
 		const temporary = `${this.filePath}.${process.pid}.${Date.now().toString(36)}.tmp`;
 		let handle: Awaited<ReturnType<typeof open>> | undefined;
 		try {

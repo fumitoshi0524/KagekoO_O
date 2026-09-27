@@ -11,7 +11,7 @@ Kageko runs on your machine with your user account's operating-system privileges
 
 ## Credentials, sessions, and logs
 
-- Provider credentials and MCP tokens are stored locally in `~/.kageko/auth.json` and `~/.kageko/mcp-tokens.json`. They are not encrypted at rest. On Unix, Kageko requires a private containing directory and writes private files; on Windows, access depends on the account and filesystem ACLs.
+- Provider credentials and MCP tokens are stored locally in `~/.kageko/auth.json` and `~/.kageko/mcp-tokens.json`. They are not encrypted at rest. On Unix, Kageko creates the containing directory with private permissions, rejects an existing directory accessible to other users, and writes private files. If an older directory is too broad, set its permissions to `0700` before using the credential store. On Windows, access depends on the account and filesystem ACLs.
 - Kageko removes commonly named credential variables from child process environments by default. A secret with an unusual variable name or stored in a file may still be reachable by a shell command or extension.
 - Sessions, tool output, memory and learning artifacts are persisted locally. They can contain source code or other sensitive content. Inspect them before sharing diagnostic bundles.
 - Telemetry is disabled by default. When enabled, it is stored locally with size and retention limits and heuristic secret redaction; it is not automatically uploaded. Redaction cannot guarantee removal of every secret.

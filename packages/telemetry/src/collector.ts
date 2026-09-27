@@ -337,7 +337,7 @@ export class TelemetryCollector {
 	}
 
 	private async _writeChunk(events: SerializedEvent[]): Promise<void> {
-		await fs.mkdir(this.kagekoDir, { recursive: true });
+		await fs.mkdir(this.kagekoDir, { recursive: true, mode: 0o700 });
 		const logPath = path.join(this.kagekoDir, TELEMETRY_FILE_NAME);
 		const chunk = events.map((event) => event.line).join("");
 		const chunkBytes = Buffer.byteLength(chunk, "utf-8");
@@ -352,7 +352,7 @@ export class TelemetryCollector {
 		const serialized = this._serializeEvents(events);
 		if (serialized.length === 0) return true;
 		try {
-			await fs.mkdir(this.kagekoDir, { recursive: true });
+			await fs.mkdir(this.kagekoDir, { recursive: true, mode: 0o700 });
 			const timestamp = String(this.now()).padStart(13, "0");
 			const fileName = `telemetry.failed.${timestamp}.${randomUUID()}.jsonl`;
 			await fs.writeFile(path.join(this.kagekoDir, fileName), serialized.map((item) => item.line).join(""), {

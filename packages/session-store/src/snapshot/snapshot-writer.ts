@@ -14,7 +14,7 @@ export class SnapshotWriter {
 		if (!Number.isSafeInteger(snapshot.schemaVersion) || snapshot.schemaVersion < 1)
 			throw new Error("Invalid snapshot schema version");
 		if (!Number.isInteger(snapshot.sequence) || snapshot.sequence < 0) throw new Error("Invalid snapshot sequence");
-		await mkdir(path.dirname(this.filePath), { recursive: true });
+		await mkdir(path.dirname(this.filePath), { recursive: true, mode: 0o700 });
 		const temporary = `${this.filePath}.${process.pid}.${randomUUID()}.tmp`;
 		let handle: Awaited<ReturnType<typeof open>> | undefined;
 		try {

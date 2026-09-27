@@ -1469,7 +1469,7 @@ async function loadPersistentTodoStore(cwd: string, sessionId: string): Promise<
 	const store = {
 		todos,
 		async save() {
-			await fs.mkdir(directory, { recursive: true });
+			await fs.mkdir(directory, { recursive: true, mode: 0o700 });
 			await fs.writeFile(file, JSON.stringify(store.todos), "utf8");
 		},
 	};
@@ -1504,7 +1504,7 @@ async function loadPersistentIdempotencyStore(
 		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 	}
 	const save = async () => {
-		await fs.mkdir(directory, { recursive: true });
+		await fs.mkdir(directory, { recursive: true, mode: 0o700 });
 		await fs.writeFile(file, JSON.stringify(entries), "utf8");
 	};
 	return {
@@ -1539,7 +1539,7 @@ async function loadPersistentTaskBudgetStore(cwd: string, sessionId: string): Pr
 		save(): Promise<void>;
 	} = {
 		async save() {
-			await fs.mkdir(directory, { recursive: true });
+			await fs.mkdir(directory, { recursive: true, mode: 0o700 });
 			await fs.writeFile(file, JSON.stringify(store.active ?? null), "utf8");
 		},
 	};

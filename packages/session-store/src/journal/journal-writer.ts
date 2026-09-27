@@ -158,7 +158,7 @@ export class JournalWriter {
 		if (this._initialized) {
 			return;
 		}
-		await fs.mkdir(this.sessionDir, { recursive: true });
+		await fs.mkdir(this.sessionDir, { recursive: true, mode: 0o700 });
 		const state = await this._readState();
 		if (state) {
 			this._initialized = true;

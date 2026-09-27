@@ -42,7 +42,7 @@ export class FileSessionRepository implements RuntimeSessionRepository {
 				updatedAt: now,
 				archived: false,
 			};
-			await mkdir(paths.directory, { recursive: true });
+			await mkdir(paths.directory, { recursive: true, mode: 0o700 });
 			await new MetadataStore(paths.metadata, input.sessionId).create(value);
 			return value;
 		});
@@ -210,10 +210,10 @@ export class FileSessionRepository implements RuntimeSessionRepository {
 		return this.lock.run(new SessionPaths(this.rootDir, sessionId).directory.toLowerCase(), async () => {
 			// A stable per-session lock namespace preserves cross-process isolation
 			// without serializing unrelated session journals behind one root lock.
-			await mkdir(this.rootDir, { recursive: true });
+			await mkdir(this.rootDir, { recursive: true, mode: 0o700 });
 			const lockRoot = path.join(this.rootDir, ".repository-locks");
 			const lockTarget = path.join(lockRoot, createHash("sha256").update(sessionId).digest("hex"));
-			await mkdir(lockTarget, { recursive: true });
+			await mkdir(lockTarget, { recursive: true, mode: 0o700 });
 			const release = await lockfile.lock(lockTarget, {
 				realpath: false,
 				// A holder that dies mid-operation (SIGKILL, container kill) never

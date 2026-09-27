@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, chmod } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, chmod, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,7 +7,8 @@ import { createJsonFileStore } from "./json-file-store.js";
 const roots: string[] = [];
 afterEach(async () => {
 	for (const root of roots.splice(0)) {
-		if (!path.resolve(root).startsWith(`${path.resolve(tmpdir())}${path.sep}`)) throw new Error("Unsafe test cleanup path");
+		if (!path.resolve(root).startsWith(`${path.resolve(tmpdir())}${path.sep}`))
+			throw new Error("Unsafe test cleanup path");
 		await rm(root, { recursive: true, force: true });
 	}
 });
@@ -31,6 +32,18 @@ describe("credential JSON store directory permissions", () => {
 		await chmod(parent, 0o755);
 		await expect(createJsonFileStore(path.join(parent, "auth.json")).writeAll({ token: "test-only" })).rejects.toThrow(
 			"permissions are too broad",
+		);
+	});
+
+	it.skipIf(process.platform === "win32")("rejects a user-controlled symlink ancestor", async () => {
+		const root = await mkdtemp(path.join(tmpdir(), "kageko-secrets-"));
+		roots.push(root);
+		const actual = path.join(root, "actual");
+		await mkdir(actual, { mode: 0o700 });
+		const alias = path.join(root, "alias");
+		await symlink(actual, alias, "dir");
+		await expect(createJsonFileStore(path.join(alias, "auth.json")).writeAll({ token: "test-only" })).rejects.toThrow(
+			"must be a real directory",
 		);
 	});
 });

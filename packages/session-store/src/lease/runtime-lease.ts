@@ -84,7 +84,7 @@ export class RuntimeLease {
 			throw new TypeError("RuntimeLease requires a non-empty sessionId");
 		}
 		const resolvedDir = path.resolve(sessionDir);
-		await fs.mkdir(resolvedDir, { recursive: true });
+		await fs.mkdir(resolvedDir, { recursive: true, mode: 0o700 });
 		const lockPath = path.join(resolvedDir, LOCK_DIRECTORY_NAME);
 		const ownerPath = path.join(resolvedDir, OWNER_FILE_NAME);
 		const compromiseState: CompromiseState = { error: undefined };
