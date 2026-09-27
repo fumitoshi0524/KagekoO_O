@@ -1,0 +1,27 @@
+{
+	"name": "@kageko/process-supervisor",
+	"version": "0.1.0",
+	"description": "Authenticated out-of-process lifecycle supervisor for Kageko session tasks.",
+	"type": "module",
+	"license": "MIT",
+	"files": [
+		"dist"
+	],
+	"exports": {
+		".": {
+			"types": "./dist/index.d.mts",
+			"default": "./dist/index.mjs"
+		},
+		"./server": "./dist/server.mjs"
+	},
+	"scripts": {
+		"build": "tsdown && node --input-type=module -e \"import { copyFile } from 'node:fs/promises'; await copyFile('src/server.mjs', 'dist/server.mjs');\"",
+		"test": "vitest run --passWithNoTests"
+	},
+	"dependencies": {
+		"@kageko/kaos": "*"
+	},
+	"engines": {
+		"node": ">=24"
+	}
+}

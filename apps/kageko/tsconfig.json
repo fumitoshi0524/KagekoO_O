@@ -1,0 +1,13 @@
+{
+	"extends": "../../tsconfig.json",
+	"compilerOptions": {
+		"outDir": "./dist",
+		"rootDir": "../..",
+		"paths": {
+			"#/*": ["./src/*"],
+			"@/*": ["./src/*"],
+			"@kageko/node-sdk": ["../../packages/node-sdk/src/index.ts"]
+		}
+	},
+	"include": ["src/**/*.ts", "test/**/*.ts"]
+}

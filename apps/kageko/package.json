@@ -1,0 +1,53 @@
+{
+	"name": "@kageko/app",
+	"version": "0.1.0",
+	"description": "Kageko command-line application.",
+	"type": "module",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/fumitoshi0524/KagekoO_O.git",
+		"directory": "apps/kageko"
+	},
+	"homepage": "https://github.com/fumitoshi0524/KagekoO_O/tree/agent-0.x#readme",
+	"publishConfig": {
+		"access": "public"
+	},
+	"imports": {
+		"#/*": [
+			"./src/*.ts",
+			"./src/*/index.ts",
+			"./src/*.d.ts"
+		]
+	},
+	"bin": {
+		"kageko": "dist/main.mjs"
+	},
+	"files": [
+		"dist",
+		"native"
+	],
+	"scripts": {
+		"build": "tsdown && node scripts/copy-native-assets.mjs",
+		"prepublishOnly": "npm run build --prefix ../..",
+		"test": "vitest run"
+	},
+	"dependencies": {
+		"@anthropic-ai/sdk": "^0.112.4",
+		"@mistralai/mistralai": "^2.5.0",
+		"commander": "^14.0.2",
+		"tree-sitter": "^0.25.1",
+		"tree-sitter-bash": "^0.25.1"
+	},
+	"devDependencies": {
+		"@kageko/node-sdk": "*",
+		"@kageko/tui-kit": "*",
+		"@types/node": "^22.13.1",
+		"tsdown": "^0.22.0",
+		"typescript": "^6.0.2",
+		"vitest": "^4.1.4"
+	},
+	"engines": {
+		"node": ">=24"
+	}
+}

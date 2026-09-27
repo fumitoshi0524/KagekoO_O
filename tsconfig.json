@@ -1,0 +1,51 @@
+{
+	"compilerOptions": {
+		"target": "ES2024",
+		"module": "preserve",
+		"moduleResolution": "bundler",
+		"allowImportingTsExtensions": true,
+		"lib": ["ES2023"],
+		"jsx": "react-jsx",
+		"jsxImportSource": "react",
+
+		"strict": true,
+		"isolatedModules": true,
+		"noUncheckedIndexedAccess": true,
+		"noImplicitOverride": true,
+		"noPropertyAccessFromIndexSignature": true,
+		"noFallthroughCasesInSwitch": true,
+		"forceConsistentCasingInFileNames": true,
+		"verbatimModuleSyntax": true,
+		"experimentalDecorators": true,
+
+		// Typecheck-only config: never set "declaration" here. Emit is owned by
+		// tsdown (dist/); with "declaration" and no outDir, any tsc invocation
+		// that overrides noEmit scatters .d.ts files into packages/*/src.
+		"noEmit": true,
+		"skipLibCheck": true,
+		"paths": {
+			"#test-helpers/*": ["./test/helpers/*"],
+			"@kageko/agent-core": ["./packages/agent-core/src/index.ts"],
+			"@kageko/kaos": ["./packages/kaos/src/index.ts"],
+			"@kageko/kosong": ["./packages/kosong/src/index.ts"],
+			"@kageko/oauth": ["./packages/oauth/src/index.ts"],
+			"@kageko/process-supervisor": ["./packages/process-supervisor/src/index.ts"],
+			"@kageko/protocol": ["./packages/protocol/src/index.ts"],
+			"@kageko/session-store": ["./packages/session-store/src/index.ts"],
+			"@kageko/application": ["./packages/application/src/index.ts"],
+			"@kageko/node-sdk": ["./packages/node-sdk/src/index.ts"],
+			"@kageko/tui-kit": ["./packages/tui-kit/src/index.ts"],
+			"@kageko/telemetry": ["./packages/telemetry/src/index.ts"]
+		},
+
+		"types": ["node"]
+	},
+	"include": [
+		"packages/*/src/**/*.ts",
+		"packages/*/test/**/*.ts",
+		"apps/*/src/**/*.ts",
+		"apps/*/test/**/*.ts",
+		"test/**/*.ts"
+	],
+	"exclude": ["node_modules", "dist", "coverage"]
+}

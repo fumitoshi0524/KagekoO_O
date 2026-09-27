@@ -1,0 +1,75 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Build outputs
+dist/
+dist-web/
+dist-single/
+dist-native/
+build/
+*.tsbuildinfo
+.tsbuildinfo
+
+# Coverage and test artifacts
+coverage/
+.vitest-results/
+*.lcov
+.benchmark-cache/
+/benchmarks/
+.venv/
+__pycache__/
+*.py[cod]
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Local environment
+.env
+.env.local
+.env.*.local
+
+# Kageko runtime data
+.kageko/
+.kageko-local/
+
+# Temporary files
+*.tmp
+*.temp
+.tmp/
+.temp/
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Reports and generated docs
+reports/
+
+# Stray build residue (generated declarations must live in dist/, not src/)
+packages/*/src/**/*.d.ts
+apps/*/src/**/*.d.ts
+
+# Superpowers brainstorm artifacts
+.superpowers/
+
+# Runtime artifacts
+runtime.db
+artifacts/
+.allinluna/
+.allinluna-loop.db

@@ -1,0 +1,46 @@
+{
+	"name": "@kageko/agent-core",
+	"version": "0.1.0",
+	"description": "Kageko agent core: tools, permissions, memory, subagents, and turn execution.",
+	"type": "module",
+	"license": "MIT",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.mts",
+			"import": "./dist/index.mjs",
+			"default": "./dist/index.mjs"
+		}
+	},
+	"publishConfig": {
+		"exports": {
+			".": {
+				"types": "./dist/index.d.mts",
+				"import": "./dist/index.mjs",
+				"default": "./dist/index.mjs"
+			}
+		}
+	},
+	"scripts": {
+		"build": "tsdown",
+		"test": "vitest run --passWithNoTests"
+	},
+	"dependencies": {
+		"@kageko/protocol": "*",
+		"@modelcontextprotocol/sdk": "^1.0.0",
+		"ajv": "^8.17.1",
+		"safe-regex": "^2.1.1",
+		"tree-sitter": "^0.25.1",
+		"tree-sitter-bash": "^0.25.1"
+	},
+	"devDependencies": {
+		"@kageko/kaos": "*",
+		"@kageko/kosong": "*",
+		"@kageko/session-store": "*",
+		"tsdown": "^0.22.0",
+		"typescript": "^6.0.2",
+		"vitest": "^4.1.4"
+	},
+	"engines": {
+		"node": ">=24"
+	}
+}

@@ -1,0 +1,33 @@
+{
+	"name": "@kageko/tui-kit",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.mts",
+			"import": "./dist/index.mjs",
+			"default": "./dist/index.mjs"
+		}
+	},
+	"files": [
+		"dist",
+		"native"
+	],
+	"dependencies": {
+		"iconv-lite": "^0.7.3"
+	},
+	"scripts": {
+		"build": "tsdown",
+		"test": "vitest run --passWithNoTests"
+	},
+	"devDependencies": {
+		"@types/node": "^22.13.1",
+		"tsdown": "^0.22.0",
+		"typescript": "^6.0.2",
+		"vitest": "^4.1.4"
+	},
+	"engines": {
+		"node": ">=24"
+	}
+}

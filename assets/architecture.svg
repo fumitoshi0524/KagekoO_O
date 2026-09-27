@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="690" viewBox="0 0 1240 690" role="img" aria-labelledby="title desc">
+  <title id="title">Kageko architecture</title>
+  <desc id="desc">A package map showing the CLI and terminal UI flowing through the Node SDK, application runtime, and agent core, with supporting model, workspace, session, and host services.</desc>
+  <defs>
+    <linearGradient id="wash" x1="72" y1="12" x2="1128" y2="690" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F8FAFD"/>
+      <stop offset="1" stop-color="#F0F3F9"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="1034" y1="0" x2="1210" y2="214" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#DDF8F0" stop-opacity=".8"/>
+      <stop offset="1" stop-color="#DDF8F0" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="shadow" x="-12%" y="-14%" width="124%" height="140%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#253451" flood-opacity=".07"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8.2" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="m1 1 8 4-8 4" fill="none" stroke="#9AA9BE" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"/>
+    </marker>
+    <style>
+      .sans { font-family: Inter, "Segoe UI", Arial, sans-serif; }
+      .mono { font-family: "Cascadia Code", Consolas, monospace; }
+    </style>
+  </defs>
+  <rect width="1240" height="690" rx="28" fill="url(#wash)"/>
+  <circle cx="1168" cy="66" r="132" fill="url(#glow)"/>
+
+  <text class="sans" x="64" y="54" fill="#65758D" font-size="11" font-weight="700" letter-spacing="2.4">KAGEKO / SYSTEM MAP</text>
+  <text class="sans" x="64" y="96" fill="#17263E" font-size="31" font-weight="700" letter-spacing="-.7">One runtime. Clear boundaries.</text>
+  <text class="sans" x="64" y="124" fill="#68778D" font-size="14">The terminal is an interface; the application composes the agent and its host services.</text>
+  <rect x="1014" y="43" width="162" height="34" rx="17" fill="#FFFFFF" stroke="#E2E8F1"/>
+  <circle cx="1033" cy="60" r="4" fill="#57CDB2"/>
+  <text class="sans" x="1045" y="64" fill="#52627A" font-size="10" font-weight="700" letter-spacing="1.2">WORKSPACE MAP</text>
+
+  <path d="M302 244h49" fill="none" stroke="#9AA9BE" stroke-linecap="round" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M570 244h49" fill="none" stroke="#9AA9BE" stroke-linecap="round" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M864 244h53" fill="none" stroke="#9AA9BE" stroke-linecap="round" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <g filter="url(#shadow)">
+    <rect x="64" y="172" width="238" height="144" rx="18" fill="#FFFFFF" stroke="#DFE6F0"/>
+    <rect x="358" y="172" width="212" height="144" rx="18" fill="#FFFFFF" stroke="#DFE6F0"/>
+    <rect x="626" y="172" width="238" height="144" rx="18" fill="#FFFFFF" stroke="#DFE6F0"/>
+    <rect x="924" y="172" width="252" height="144" rx="18" fill="#FFFFFF" stroke="#DFE6F0"/>
+  </g>
+  <rect x="64" y="190" width="4" height="42" rx="2" fill="#7168DD"/>
+  <text class="sans" x="80" y="204" fill="#7168DD" font-size="10" font-weight="700" letter-spacing="1.5">ENTRY POINT</text>
+  <text class="sans" x="80" y="237" fill="#17263E" font-size="20" font-weight="700">CLI / TUI</text>
+  <text class="mono" x="80" y="264" fill="#485971" font-size="12">apps/kageko</text>
+  <text class="sans" x="80" y="290" fill="#75839A" font-size="11">Terminal UI via tui-kit</text>
+
+  <rect x="358" y="190" width="4" height="42" rx="2" fill="#38A998"/>
+  <text class="sans" x="374" y="204" fill="#338D80" font-size="10" font-weight="700" letter-spacing="1.3">CLIENT BOUNDARY</text>
+  <text class="sans" x="374" y="237" fill="#17263E" font-size="19" font-weight="700">Node SDK</text>
+  <text class="mono" x="374" y="264" fill="#485971" font-size="11.5">packages/node-sdk</text>
+  <text class="sans" x="374" y="290" fill="#75839A" font-size="11">Harness · session client</text>
+
+  <rect x="626" y="190" width="4" height="42" rx="2" fill="#4B85D4"/>
+  <text class="sans" x="642" y="204" fill="#3D6FB6" font-size="10" font-weight="700" letter-spacing="1.5">COMPOSITION</text>
+  <text class="sans" x="642" y="237" fill="#17263E" font-size="19" font-weight="700">Application</text>
+  <text class="mono" x="642" y="264" fill="#485971" font-size="11.5">packages/application</text>
+  <text class="sans" x="642" y="290" fill="#75839A" font-size="11">Runtime · services · ownership</text>
+
+  <rect x="924" y="190" width="4" height="42" rx="2" fill="#D47C56"/>
+  <text class="sans" x="940" y="204" fill="#B86B49" font-size="10" font-weight="700" letter-spacing="1.5">AGENT RUNTIME</text>
+  <text class="sans" x="940" y="237" fill="#17263E" font-size="19" font-weight="700">Agent Core</text>
+  <text class="mono" x="940" y="264" fill="#485971" font-size="11.5">packages/agent-core</text>
+  <text class="sans" x="940" y="290" fill="#75839A" font-size="11">Turns · tools · policy · memory</text>
+
+  <path d="M745 316v55" fill="none" stroke="#9AA9BE" stroke-linecap="round" stroke-width="2"/>
+  <path d="M187 371h858" fill="none" stroke="#9AA9BE" stroke-linecap="round" stroke-width="2"/>
+  <path d="M187 371v62" fill="none" stroke="#9AA9BE" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M473 371v62" fill="none" stroke="#9AA9BE" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M759 371v62" fill="none" stroke="#9AA9BE" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M1045 371v62" fill="none" stroke="#9AA9BE" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="64" y="337" width="194" height="28" rx="14" fill="#E9EEF5"/>
+  <text class="sans" x="79" y="355" fill="#62728A" font-size="10" font-weight="700" letter-spacing="1.1">RUNTIME SERVICES</text>
+
+  <g filter="url(#shadow)">
+    <rect x="64" y="445" width="246" height="156" rx="18" fill="#FFFFFF" stroke="#DFE6F0"/>
+    <rect x="350" y="445" width="246" height="156" rx="18" fill="#FFFFFF" stroke="#DFE6F0"/>
+    <rect x="636" y="445" width="246" height="156" rx="18" fill="#FFFFFF" stroke="#DFE6F0"/>
+    <rect x="922" y="445" width="246" height="156" rx="18" fill="#FFFFFF" stroke="#DFE6F0"/>
+  </g>
+
+  <circle cx="88" cy="475" r="6" fill="#38A998"/>
+  <text class="sans" x="104" y="479" fill="#64748B" font-size="10" font-weight="700" letter-spacing="1.3">MODEL &amp; AUTH</text>
+  <text class="mono" x="84" y="519" fill="#17263E" font-size="16" font-weight="700">kosong + oauth</text>
+  <text class="sans" x="84" y="546" fill="#75839A" font-size="11.5">Provider routes · credentials</text>
+  <path d="M84 570h56" stroke="#A6E7D9" stroke-width="3" stroke-linecap="round"/>
+
+  <circle cx="374" cy="475" r="6" fill="#4B85D4"/>
+  <text class="sans" x="390" y="479" fill="#64748B" font-size="10" font-weight="700" letter-spacing="1.3">WORKSPACE</text>
+  <text class="mono" x="370" y="519" fill="#17263E" font-size="16" font-weight="700">kaos</text>
+  <text class="sans" x="370" y="546" fill="#75839A" font-size="11.5">Filesystem · environment</text>
+  <path d="M370 570h56" stroke="#BCD5F5" stroke-width="3" stroke-linecap="round"/>
+
+  <circle cx="660" cy="475" r="6" fill="#7168DD"/>
+  <text class="sans" x="676" y="479" fill="#64748B" font-size="10" font-weight="700" letter-spacing="1.3">DURABLE STATE</text>
+  <text class="mono" x="656" y="519" fill="#17263E" font-size="14.5" font-weight="700">session-store</text>
+  <text class="mono" x="656" y="539" fill="#485971" font-size="11.5">+ protocol</text>
+  <text class="sans" x="656" y="565" fill="#75839A" font-size="11">Sessions · event contracts</text>
+
+  <circle cx="946" cy="475" r="6" fill="#D47C56"/>
+  <text class="sans" x="962" y="479" fill="#64748B" font-size="10" font-weight="700" letter-spacing="1.3">HOST SERVICES</text>
+  <text class="mono" x="942" y="519" fill="#17263E" font-size="13.5" font-weight="700">process-supervisor</text>
+  <text class="mono" x="942" y="539" fill="#485971" font-size="11.5">+ telemetry</text>
+  <text class="sans" x="942" y="565" fill="#75839A" font-size="11">Processes · observability</text>
+
+  <rect x="64" y="626" width="1104" height="38" rx="12" fill="#E8EDF5"/>
+  <circle cx="84" cy="645" r="4" fill="#7168DD"/>
+  <text class="sans" x="98" y="649" fill="#586982" font-size="11.5">The application composes services; the agent core runs through stable contracts and injected ports.</text>
+</svg>

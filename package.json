@@ -1,0 +1,60 @@
+{
+	"name": "@kageko/monorepo",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Kageko — AI coding agent distribution, rewritten from scratch.",
+	"type": "module",
+	"license": "MIT",
+	"workspaces": [
+		"packages/protocol",
+		"packages/kaos",
+		"packages/oauth",
+		"packages/kosong",
+		"packages/telemetry",
+		"packages/session-store",
+		"packages/process-supervisor",
+		"packages/agent-core",
+		"packages/application",
+		"packages/node-sdk",
+		"packages/tui-kit",
+		"apps/kageko"
+	],
+	"scripts": {
+		"build": "npm run build --workspaces --if-present",
+		"verify:public-tree": "node scripts/verify-public-tree.mjs",
+		"test": "npm run build && npm run test:unit && npm run test:acceptance",
+		"test:unit": "vitest run --config vitest.unit.config.ts",
+		"test:acceptance": "vitest run --config vitest.acceptance.config.ts",
+		"test:e2e": "npm run build && vitest run --config vitest.acceptance.config.ts test/acceptance/agent-mission.e2e.test.ts",
+		"verify:package": "node scripts/verify-package.mjs",
+		"typecheck": "tsc --noEmit",
+		"install:global": "npm install && npm run build --workspaces --if-present && npm install --global --install-links=false ./apps/kageko",
+		"lint": "eslint .",
+		"lint:fix": "eslint . --fix",
+		"format": "prettier --write .",
+		"format:check": "prettier --check .",
+		"clean": "npm run clean --workspaces --if-present"
+	},
+	"engines": {
+		"node": ">=24.0.0"
+	},
+	"devDependencies": {
+		"@eslint/js": "^10.0.1",
+		"@types/node": "^26.1.1",
+		"esbuild": "^0.28.1",
+		"eslint": "^10.8.0",
+		"globals": "^16.1.0",
+		"node-pty": "^1.1.0",
+		"prettier": "^3.5.6",
+		"tsdown": "^0.22.12",
+		"typescript": "^7.0.2",
+		"vitest": "^4.1.10"
+	},
+	"allowScripts": {
+		"esbuild": true,
+		"protobufjs": true,
+		"tree-sitter": true,
+		"tree-sitter-bash": true,
+		"node-pty@1.1.0": true
+	}
+}

@@ -1,0 +1,30 @@
+{
+	"name": "@kageko/node-sdk",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.mts",
+			"import": "./dist/index.mjs",
+			"default": "./dist/index.mjs"
+		}
+	},
+	"publishConfig": {
+		"exports": {
+			".": {
+				"types": "./dist/index.d.mts",
+				"import": "./dist/index.mjs",
+				"default": "./dist/index.mjs"
+			}
+		}
+	},
+	"scripts": {
+		"build": "tsdown",
+		"test": "vitest run --passWithNoTests"
+	},
+	"dependencies": {
+		"@kageko/application": "*",
+		"@kageko/protocol": "*"
+	}
+}

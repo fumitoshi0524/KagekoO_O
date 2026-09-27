@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144" role="img" aria-labelledby="title desc">
+  <title id="title">Kageko mark</title>
+  <desc id="desc">A terminal window with Kageko's pair of eyes and a ready prompt.</desc>
+  <rect x="18" y="18" width="108" height="108" rx="28" fill="#18181B" stroke="#5A5A5A" stroke-width="2"/>
+  <circle cx="52" cy="61" r="8" fill="#A78BFA"/>
+  <circle cx="92" cy="61" r="8" fill="#A78BFA"/>
+  <path d="m48 83 10 8-10 8" fill="none" stroke="#5BC0BE" stroke-linecap="round" stroke-linejoin="round" stroke-width="5"/>
+  <path d="M68 99h19" fill="none" stroke="#5BC0BE" stroke-linecap="round" stroke-width="5"/>
+</svg>
