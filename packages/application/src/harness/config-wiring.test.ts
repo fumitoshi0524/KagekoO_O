@@ -1,5 +1,7 @@
+import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+	capabilityRootsForWorkspace,
 	compactionOptionsFromConfig,
 	coordinatorMaxStepsFromRoute,
 	learningSynthesisOptionsFromConfig,
@@ -143,5 +145,50 @@ describe("learningSynthesisOptionsFromConfig", () => {
 			mcpSynthesisTimeoutMs: 600_000,
 			skillSimilarityThreshold: 0.7,
 		});
+	});
+});
+
+describe("capabilityRootsForWorkspace", () => {
+	async function withHome<T>(home: string, run: () => Promise<T>): Promise<T> {
+		const previousHome = process.env["KAGEKO_HOME"];
+		process.env["KAGEKO_HOME"] = home;
+		try {
+			return await run();
+		} finally {
+			if (previousHome === undefined) delete process.env["KAGEKO_HOME"];
+			else process.env["KAGEKO_HOME"] = previousHome;
+		}
+	}
+
+	it("lists user and project capability roots for a regular workspace", async () => {
+		const home = path.resolve("home-dir");
+		const cwd = path.resolve("some-project");
+		const roots = await withHome(home, () => capabilityRootsForWorkspace(cwd));
+		expect(roots.pluginRoots.map((root) => root.path)).toEqual([
+			path.join(home, ".kageko", "plugins"),
+			path.join(cwd, ".kageko", "plugins"),
+		]);
+		expect(roots.skillRoots.map((root) => root.path)).toEqual([
+			path.join(home, ".kageko", "skills"),
+			path.join(home, ".kageko", "skills", "auto"),
+			path.join(cwd, ".kageko", "skills"),
+			path.join(cwd, ".kageko", "skills", "auto"),
+		]);
+		expect(roots.autoMcpDir).toBe(path.join(cwd, ".kageko", "mcp", "auto"));
+		expect(roots.autoToolsDir).toBe(path.join(cwd, ".kageko", "tools", "auto"));
+	});
+
+	it("omits duplicate project roots when the workspace is the Kageko home directory", async () => {
+		const home = path.resolve("home-dir");
+		const roots = await withHome(home, () => capabilityRootsForWorkspace(home));
+		expect(roots.pluginRoots).toEqual([{ path: path.join(home, ".kageko", "plugins"), source: "user" }]);
+		expect(roots.skillRoots).toEqual([
+			{ path: path.join(home, ".kageko", "skills"), source: "user" },
+			{ path: path.join(home, ".kageko", "skills", "auto"), source: "auto" },
+		]);
+		// Synthesized workspace capabilities keep loading from the shared
+		// directory with their project_auto origin.
+		expect(roots.autoMcpDir).toBe(path.join(home, ".kageko", "mcp", "auto"));
+		expect(roots.autoToolsDir).toBe(path.join(home, ".kageko", "tools", "auto"));
 	});
 });

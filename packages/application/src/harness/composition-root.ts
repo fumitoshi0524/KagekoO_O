@@ -93,7 +93,7 @@ import { TaskService } from "../tasks/task-service.js";
 import { ConfigService } from "../configuration/config-service.js";
 import { ConfigWriter } from "../configuration/config-writer.js";
 import { WorkspaceService } from "../workspace/workspace-service.js";
-import { WorkspaceTrustService } from "../workspace/workspace-trust-service.js";
+import { isUserLayerWorkspace, WorkspaceTrustService } from "../workspace/workspace-trust-service.js";
 import { ApprovalService } from "../interactions/approval-service.js";
 import { QuestionService } from "../interactions/question-service.js";
 import { AuthService } from "../auth/auth-service.js";
@@ -1289,12 +1289,8 @@ async function prepareCapabilitySnapshot({
 	skillService: SkillService;
 	onDiagnostic?: (message: string) => void | Promise<void>;
 }): Promise<PreparedCapabilitySnapshot> {
-	const projectKagekoDir = path.join(cwd, ".kageko");
-	const pluginRoots = [
-		{ path: path.join(kagekoHomeDir(), ".kageko", "plugins"), source: "user" },
-		{ path: path.join(projectKagekoDir, "plugins"), source: "project" },
-	] as const;
-	const plugins = await pluginService.prepare(pluginRoots);
+	const roots = await capabilityRootsForWorkspace(cwd);
+	const plugins = await pluginService.prepare(roots.pluginRoots);
 	for (const diagnostic of plugins.diagnostics) {
 		try {
 			void Promise.resolve(onDiagnostic?.(`Plugin ${diagnostic.plugin}: ${diagnostic.message}`)).catch(() => {});
@@ -1302,12 +1298,7 @@ async function prepareCapabilitySnapshot({
 			/* non-fatal */
 		}
 	}
-	const skillRoots = [
-		{ path: path.join(kagekoHomeDir(), ".kageko", "skills"), source: "user" },
-		{ path: path.join(kagekoHomeDir(), ".kageko", "skills", "auto"), source: "auto" },
-		{ path: path.join(projectKagekoDir, "skills"), source: "project" },
-		{ path: path.join(projectKagekoDir, "skills", "auto"), source: "auto" },
-	];
+	const skillRoots = [...roots.skillRoots];
 	for (const { pluginId, path: pluginPath, source } of plugins.skillDirs()) {
 		skillRoots.push({ path: pluginPath, source: `${source}:${pluginId}` });
 	}
@@ -1319,7 +1310,7 @@ async function prepareCapabilitySnapshot({
 			/* non-fatal */
 		}
 	}
-	const autoConfigs = await loadAutoMcpServers(path.join(projectKagekoDir, "mcp", "auto"), (diagnostic) => {
+	const autoConfigs = await loadAutoMcpServers(roots.autoMcpDir, (diagnostic) => {
 		try {
 			void Promise.resolve(onDiagnostic?.(`Automatic MCP ${diagnostic.path}: ${diagnostic.message}`)).catch(() => {});
 		} catch {
@@ -1340,7 +1331,7 @@ async function prepareCapabilitySnapshot({
 		for (const skill of skills.list()) {
 			registry.register(createSkillTool(skill), { origin: "skill", ownerId: skill.source, accesses: noAccess() });
 		}
-		for (const tool of await loadAutoTools(path.join(projectKagekoDir, "tools", "auto"), scrubEnvironment)) {
+		for (const tool of await loadAutoTools(roots.autoToolsDir, scrubEnvironment)) {
 			registry.register(tool, { origin: "project_auto", ownerId: cwd, accesses: noAccess() });
 		}
 		await mcp.connectAll();
@@ -2490,6 +2481,45 @@ export function shellTimeoutsFromConfig(shell: ShellConfig | undefined): BashToo
 		defaultTimeoutMs: shell?.defaultTimeoutMs,
 		maxTimeoutMs: shell?.maxTimeoutMs,
 	});
+}
+
+/**
+ * Capability discovery roots for a workspace. When the workspace is the Kageko
+ * home directory, the project `.kageko` layer coincides with the device-private
+ * user layer; returning the plugin/skill roots twice would load every user
+ * plugin and skill a second time. The automatic tool/MCP directories stay
+ * project-scoped: they hold capabilities synthesized for this workspace and
+ * must keep loading (and keep their `project_auto` origin) in that layout too.
+ */
+export async function capabilityRootsForWorkspace(cwd: string): Promise<{
+	pluginRoots: readonly { path: string; source: "user" | "project" }[];
+	skillRoots: { path: string; source: string }[];
+	autoMcpDir: string;
+	autoToolsDir: string;
+}> {
+	const userKagekoDir = path.join(kagekoHomeDir(), ".kageko");
+	const projectKagekoDir = path.join(path.resolve(cwd), ".kageko");
+	// Share the trust service's canonicalizing comparison so both sides agree on
+	// whether the workspace is the user layer, even through links or 8.3 names.
+	const projectIsUserLayer = await isUserLayerWorkspace(cwd);
+	return {
+		pluginRoots: [
+			{ path: path.join(userKagekoDir, "plugins"), source: "user" },
+			...(projectIsUserLayer ? [] : [{ path: path.join(projectKagekoDir, "plugins"), source: "project" as const }]),
+		],
+		skillRoots: [
+			{ path: path.join(userKagekoDir, "skills"), source: "user" },
+			{ path: path.join(userKagekoDir, "skills", "auto"), source: "auto" },
+			...(projectIsUserLayer
+				? []
+				: [
+						{ path: path.join(projectKagekoDir, "skills"), source: "project" },
+						{ path: path.join(projectKagekoDir, "skills", "auto"), source: "auto" },
+					]),
+		],
+		autoMcpDir: path.join(projectKagekoDir, "mcp", "auto"),
+		autoToolsDir: path.join(projectKagekoDir, "tools", "auto"),
+	};
 }
 
 /** Map the `learning` config section onto the resident learner's synthesis options. */

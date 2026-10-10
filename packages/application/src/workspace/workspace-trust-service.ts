@@ -53,6 +53,15 @@ export class WorkspaceTrustService {
 
 	async inspect(cwd: string): Promise<WorkspaceTrustStatus> {
 		const workspace = await canonicalWorkspace(cwd);
+		// `<kagekoHomeDir()>/.kageko` is the device-private user layer: its
+		// config, plugins, and skills are loaded in every workspace without a
+		// trust gate. When the workspace *is* the home directory, the project
+		// layer coincides with the user layer, so gating (or even scanning) it
+		// would block the user's own configuration — for example after a
+		// permanent model switch writes model.baseUrl there.
+		if (await isCanonicalUserLayerWorkspace(workspace)) {
+			return { workspace, hasSecurityConfiguration: false, trusted: true };
+		}
 		const scanned = await scanSecurityConfiguration(workspace);
 		if (!scanned.hasSecurityConfiguration) return { workspace, hasSecurityConfiguration: false, trusted: true };
 		const document = await this.readDocument();
@@ -135,6 +144,25 @@ export class WorkspaceTrustService {
 
 async function canonicalWorkspace(cwd: string): Promise<string> {
 	return path.normalize(await fs.realpath(path.resolve(cwd)));
+}
+
+/** Lenient canonicalization for path equality checks on possibly-missing paths. */
+async function canonicalizeForComparison(target: string): Promise<string> {
+	const resolved = path.resolve(target);
+	try {
+		return path.normalize(await fs.realpath(resolved));
+	} catch {
+		return path.normalize(resolved);
+	}
+}
+
+/** True when `cwd` resolves to the Kageko home directory (the user layer). */
+export async function isUserLayerWorkspace(cwd: string): Promise<boolean> {
+	return isCanonicalUserLayerWorkspace(await canonicalizeForComparison(cwd));
+}
+
+async function isCanonicalUserLayerWorkspace(workspace: string): Promise<boolean> {
+	return samePath(workspace, await canonicalizeForComparison(kagekoHomeDir()));
 }
 
 async function scanSecurityConfiguration(
