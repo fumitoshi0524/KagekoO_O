@@ -1,0 +1,8 @@
+version: 2
+updates:
+  # npm workspaces share the root package-lock.json, so "/" covers every workspace.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

@@ -60,6 +60,9 @@ protocol   -> no runtime package
 - `npm run lint` — eslint.
 - `npx tsc --noEmit` — typecheck (must stay green).
 - `npm run test:e2e` — end-to-end script against a real harness.
+- `npm run audit:deps` — block high/critical dependency vulnerabilities
+  (time-boxed waivers live in `.github/audit-allowlist.json`); runs in CI and
+  before `install:global` publishes.
 
 ## Working agreements
 
