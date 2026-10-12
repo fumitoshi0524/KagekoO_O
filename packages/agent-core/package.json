@@ -26,7 +26,7 @@
 	},
 	"dependencies": {
 		"@kageko/protocol": "*",
-		"@modelcontextprotocol/sdk": "^1.0.0",
+		"@modelcontextprotocol/sdk": "^1.32.1",
 		"ajv": "^8.17.1",
 		"safe-regex": "^2.1.1",
 		"tree-sitter": "^0.25.1",
