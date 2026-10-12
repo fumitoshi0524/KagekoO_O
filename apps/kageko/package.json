@@ -34,7 +34,7 @@
 	},
 	"dependencies": {
 		"@anthropic-ai/sdk": "^0.112.4",
-		"@mistralai/mistralai": "^2.5.0",
+		"@mistralai/mistralai": "^2.7.0",
 		"commander": "^14.0.2",
 		"tree-sitter": "^0.25.1",
 		"tree-sitter-bash": "^0.25.1"
