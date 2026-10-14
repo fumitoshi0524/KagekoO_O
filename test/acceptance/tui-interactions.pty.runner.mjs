@@ -71,10 +71,19 @@ try {
 	else if (batch === "mouse") await mouseJourney();
 	else throw new Error(`Unknown interaction batch: ${batch}`);
 
-	const exitMark = output.length;
 	const exitCommand = batch === "matrix" ? "/quit" : "/exit";
-	await submitText(exitCommand);
-	await waitFor(() => exited || output.slice(exitMark).includes("Session closed"), exitCommand, 15_000);
+	for (let attempt = 0; attempt < 2; attempt += 1) {
+		const exitMark = output.length;
+		await submitText(exitCommand);
+		try {
+			await waitFor(() => exited || output.slice(exitMark).includes("Session closed"), exitCommand, 15_000);
+			break;
+		} catch (error) {
+			if (attempt === 1 || exited) throw error;
+			// A swallowed exit command leaves the TUI idle; reset and resubmit once.
+			await resetToComposer();
+		}
+	}
 	console.log(`PASS: ${batch} interactive TUI journeys completed`);
 } catch (error) {
 	console.error(error instanceof Error ? error.stack : String(error));
@@ -274,16 +283,32 @@ async function capabilitiesJourney() {
 		pressEscape();
 		await waitComposer();
 	}
-	let mark = await open("/skills", "Skills");
-	await choose("Reload skills");
-	await waitForText(mark, "Capabilities reloaded.", "skill reload");
+	await reloadCapabilitiesViaPanel("/skills", "Skills", "Reload skills", "skill reload");
 	pressEscape();
 	await waitComposer();
-	mark = await open("/mcp", "Mcp", "Reconnect capabilities", 60_000);
-	await choose("Reconnect capabilities");
-	await waitForText(mark, "Capabilities reloaded.", "MCP reconnect");
+	await reloadCapabilitiesViaPanel("/mcp", "Mcp", "Reconnect capabilities", "MCP reconnect");
 	pressEscape();
 	await waitComposer();
+}
+
+// A capability reload records its status while the panel keeps reloading
+// behind it. Wait for the restored idle menu before returning so a following
+// Escape cannot abort that reload, and retry the whole interaction once: a
+// loaded Windows PTY occasionally drops one input burst.
+async function reloadCapabilitiesViaPanel(command, title, actionLabel, label) {
+	for (let attempt = 0; attempt < 2; attempt += 1) {
+		const mark = await open(command, title, actionLabel, 60_000);
+		await choose(actionLabel);
+		const actionMark = output.length;
+		try {
+			await waitForText(mark, "Capabilities reloaded.", label, 30_000);
+			await waitForText(actionMark, "Search: type to filter", `${label} panel restore`, 60_000);
+			return;
+		} catch (error) {
+			if (attempt === 1) throw error;
+			await resetToComposer();
+		}
+	}
 }
 
 async function managementJourney() {
@@ -1643,19 +1668,52 @@ async function setupJourney() {
 }
 
 async function open(command, title, readyText = "Search: type to filter", timeoutMs = 15_000) {
-	const mark = output.length;
-	await submitText(command);
-	await waitForText(mark, title, `${command} panel`, timeoutMs);
-	await waitForText(mark, readyText, `${command} input ownership`, timeoutMs);
-	if (command === "/config") {
-		await waitFor(() => {
-			const rendered = visibleText(output.slice(mark));
-			const loading = rendered.lastIndexOf("Loading settings…");
-			return loading >= 0 && rendered.lastIndexOf("Turns & compaction") > loading;
-		}, "loaded settings sections", timeoutMs);
+	let lastError;
+	for (let attempt = 0; attempt < 2; attempt += 1) {
+		const mark = output.length;
+		await submitText(command);
+		try {
+			await waitForText(mark, title, `${command} panel`, timeoutMs);
+			await waitForText(mark, readyText, `${command} input ownership`, timeoutMs);
+			if (command === "/config") {
+				await waitFor(() => {
+					const rendered = visibleText(output.slice(mark));
+					const loading = rendered.lastIndexOf("Loading settings…");
+					return loading >= 0 && rendered.lastIndexOf("Turns & compaction") > loading;
+				}, "loaded settings sections", timeoutMs);
+			}
+			await delay(300);
+			return mark;
+		} catch (error) {
+			lastError = error;
+			// A loaded Windows PTY occasionally drops one input burst; unwind to
+			// the composer and resubmit the command once instead of failing.
+			await resetToComposer();
+		}
 	}
-	await delay(300);
-	return mark;
+	throw lastError;
+}
+// Escape unwinds one overlay layer at a time and is a no-op at an idle
+// composer; Ctrl+C would quit the TUI instead, so it is never sent here. A
+// busy panel spends its first Escape cancelling the in-flight action, so the
+// unwinding retries. Backspace clears an unsubmitted command a lost Enter left
+// behind and is a no-op on an empty composer.
+async function resetToComposer() {
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		const mark = output.length;
+		try {
+			pressEscape();
+			terminal.write("\x7f".repeat(100));
+		} catch {
+			return; // The PTY is already gone; nothing left to reset.
+		}
+		try {
+			await waitForText(mark, "Ask Kageko", "composer after escape", 3_000);
+			return;
+		} catch {
+			// A busy panel spent this Escape cancelling its action; try again.
+		}
+	}
 }
 async function openWhenIdle(command, title, readyText, timeoutMs) {
 	const deadline = Date.now() + timeoutMs;
