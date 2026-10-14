@@ -15,9 +15,9 @@
 		"test": "vitest run --passWithNoTests"
 	},
 	"dependencies": {
-		"@anthropic-ai/sdk": "^0.112.4",
-		"@aws-sdk/client-bedrock-runtime": "^3.1115.0",
-		"@mistralai/mistralai": "^2.5.0"
+		"@anthropic-ai/sdk": "^0.132.1",
+		"@aws-sdk/client-bedrock-runtime": "^3.1151.0",
+		"@mistralai/mistralai": "^2.7.0"
 	},
 	"peerDependencies": {
 		"@opentelemetry/api": "^1.9.0"
