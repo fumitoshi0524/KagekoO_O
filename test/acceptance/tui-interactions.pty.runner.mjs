@@ -383,14 +383,18 @@ async function managementJourney() {
 
 	mark = await open("/auth", "Provider credentials");
 	await choose("OpenAI API");
+	await waitForText(mark, "Credentials · OpenAI API", "OpenAI credential actions before API key removal");
 	await choose("Remove credential");
+	await waitForText(mark, "Remove API key", "API credential removal options");
 	await choose("Remove API key");
 	await waitForText(mark, "Remove the API credential for OpenAI API?", "API key removal confirmation");
 	pressEscape();
 	await waitForText(mark, "API credential removal cancelled for OpenAI API.", "API key removal cancellation");
 	mark = await open("/auth", "Provider credentials");
 	await choose("OpenAI API");
+	await waitForText(mark, "Credentials · OpenAI API", "OpenAI credential actions before API key removal retry");
 	await choose("Remove credential");
+	await waitForText(mark, "Remove API key", "API credential removal options retry");
 	await choose("Remove API key");
 	pressEnter();
 	await waitForText(mark, "API credential removed for OpenAI API.", "API key removal success");
