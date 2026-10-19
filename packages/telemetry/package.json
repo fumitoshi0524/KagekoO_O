@@ -17,7 +17,7 @@
 	"devDependencies": {
 		"tsdown": "^0.22.0",
 		"typescript": "^6.0.2",
-		"vitest": "^4.1.4"
+		"vitest": "^5.0.5"
 	},
 	"engines": {
 		"node": ">=24"
