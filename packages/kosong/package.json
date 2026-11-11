@@ -15,7 +15,7 @@
 		"test": "vitest run --passWithNoTests"
 	},
 	"dependencies": {
-		"@anthropic-ai/sdk": "^0.132.1",
+		"@anthropic-ai/sdk": "^0.135.0",
 		"@aws-sdk/client-bedrock-runtime": "^3.1151.0",
 		"@mistralai/mistralai": "^2.7.0"
 	},
@@ -30,7 +30,7 @@
 	"devDependencies": {
 		"tsdown": "^0.22.0",
 		"typescript": "^6.0.2",
-		"vitest": "^4.1.4"
+		"vitest": "^5.0.5"
 	},
 	"engines": {
 		"node": ">=24"
