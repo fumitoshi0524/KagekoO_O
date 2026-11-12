@@ -33,9 +33,9 @@
 		"test": "vitest run"
 	},
 	"dependencies": {
-		"@anthropic-ai/sdk": "^0.132.1",
+		"@anthropic-ai/sdk": "^0.135.0",
 		"@mistralai/mistralai": "^2.7.0",
-		"commander": "^14.0.2",
+		"commander": "^15.0.0",
 		"tree-sitter": "^0.25.1",
 		"tree-sitter-bash": "^0.25.1"
 	},
@@ -45,7 +45,7 @@
 		"@types/node": "^22.13.1",
 		"tsdown": "^0.22.0",
 		"typescript": "^6.0.2",
-		"vitest": "^4.1.4"
+		"vitest": "^5.0.5"
 	},
 	"engines": {
 		"node": ">=24"

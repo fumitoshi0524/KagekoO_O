@@ -1811,7 +1811,16 @@ async function closePanelToComposer() {
 	}
 }
 async function waitComposer() {
-	await delay(150);
+	const deadline = Date.now() + 15_000;
+	while (Date.now() < deadline) {
+		const rendered = visibleText(output.slice(-4_000));
+		if (rendered.includes("Ask Kageko")) {
+			await waitForOutputIdle(250, Math.min(3_000, Math.max(1, deadline - Date.now())));
+			return;
+		}
+		await delay(25);
+	}
+	throw new Error(`Timed out waiting for composer\n${output.slice(-8_000)}`);
 }
 
 async function assertGoal(status, objective) {
